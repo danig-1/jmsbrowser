@@ -114,12 +114,13 @@ unchanged.
 | --- | --- |
 | Tab / Shift+Tab | Change panel focus; in expanded detail, cycle detail tabs |
 | Mouse click | Focus panels, select rows, activate detail tabs or inspector controls |
+| Click Queue / Depth header | Sort queues by name / numeric depth; click the same header again to reverse |
 | Mouse drag on a vertical divider | Resize the adjacent panels |
 | Double-click a divider / Escape during drag | Reset widths / cancel the drag |
 | Up / Down | Select connection, queue or message |
 | Left / Right | No action in connection, queue or message lists |
 | Home / End | First / last matching row |
-| Enter | Connect server; in queues refresh only the selected depth; in messages expand / restore detail |
+| Enter | Connect server; in queues load messages and refresh the selected depth; in messages expand / restore detail |
 | d | Disconnect selected server |
 | PgUp / PgDn, mouse wheel over detail | Scroll payload / headers / properties |
 | [ / ] | Scroll long detail lines horizontally; disable Body wrapping first |
@@ -136,21 +137,36 @@ unchanged.
 | Inspector c / Refresh consumers | Refresh only consumer metadata; r has no action here |
 | Inspector Tab / Shift+Tab | Focus list, Refresh consumers or Close |
 | Inspector Escape / Close | Return from details to list, then close; Close closes immediately |
-| q | Quit |
+| q / Ctrl+C | Quit, clear the curses screen and restore the terminal cursor |
 
 The green dot follows a live provider connection. Each connection has an isolated
 worker process, so networking and Java calls do not block terminal navigation.
 Requests have a configurable deadline; a stuck worker is terminated and can be
 reconnected. Delayed results for a previously selected queue are discarded.
 Queue-depth refreshes keep focus and message selection in place. Selecting a
-queue with Up / Down still updates its message preview; Enter on a queue queries
-only that queue's depth and keeps the queue panel focused. Routing labels and the
+queue with Up / Down, Home / End or a single mouse click does not query messages.
+Changing queues clears the previous messages and shows a prompt to press Enter.
+Enter on a queue loads its messages, refreshes only that queue's depth, and keeps
+the queue panel focused; double-clicking a queue performs the same action.
+Connecting a server initially lists queues without loading messages, unless
+`--queue` explicitly requests an initial queue. Refreshing queue depths with `r`
+does not load messages; refreshes from the other panels reload messages only
+after that queue has been opened. Routing labels and the
 connection/queue breadcrumb line are omitted from the screen.
 The selected depth cell displays `...` while its inquiry is pending. Detail-tab
 labels retain fixed positions and widths; the active tab uses a background highlight.
 The queue panel has no Refresh or Consumers buttons; use the `r refresh` and
 `c consumers` shortcuts shown in the bottom bar. In the consumer inspector,
 press `c` again to refresh the consumer list.
+
+Queues default to alphabetical name order, ascending. Click **Queue** or
+**Depth** to sort the middle panel; selecting a different column starts ascending,
+and clicking the active column toggles descending/ascending. An up/down arrow
+marks the active column and direction (`^` / `v` in ASCII mode). Depth sorts
+numerically, with equal depths ordered by queue name. Sorting applies to the
+filtered list and stays active across refreshes and connection changes for the
+session. It preserves the selected queue and loaded messages without querying
+the broker; Up / Down follows the displayed order.
 
 Local refresh timing was checked before and after the latest changes. Windows
 tried IPv6 `::1` for `localhost` before falling back to the IPv4-only Compose port,
@@ -239,7 +255,9 @@ accepted with or without quotes; quoting preserves leading zeros.
 Jolokia uses the broker password when no separate management password is set.
 
 `queue_pattern` defaults to `"*"`, showing all discovered queues permitted by the
-broker account, including names outside `DEV.`. IBM omits queues whose metadata
+broker account, including names outside `DEV.`. Artemis hides queues marked
+`Temporary` by the broker, including temporary reply and subscription queues;
+ordinary queues remain visible even when their names contain UUIDs. IBM omits queues whose metadata
 inquiry is denied and internal PCF reply queues. All example connections use
 this default. To narrow the list,
 use `DEV.*` for names starting with `DEV.` or `DEV.ORDERS` for that name.

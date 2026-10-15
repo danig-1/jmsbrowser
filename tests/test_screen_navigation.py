@@ -21,6 +21,7 @@ def controller():
     state.status, state.queues = "connected", adapter.list_queues()
     state.queue_index = next(i for i, q in enumerate(state.queues) if q.name == "DEV.ORDERS")
     state.messages = adapter.browse("DEV.ORDERS")
+    state.messages_loaded = True
     controller.pane = 2
     yield controller
     controller.close()
@@ -100,6 +101,15 @@ def test_empty_queue_and_small_terminal(controller):
     assert "Resize terminal" in "\n".join(render(controller, 80, 24).plain_lines())
 
 
+def test_unopened_queue_prompts_for_enter_instead_of_claiming_it_is_empty(controller):
+    controller.select_queue(next(i for i, q in enumerate(controller.current.queues) if q.name == "DEV.EMPTY"))
+    text = "\n".join(render(controller, 144, 42).plain_lines())
+    assert "Press Enter on a queue to load messages." in text
+    assert "Queue is empty" not in text
+    controller.current.messages_loaded = True
+    assert "Queue is empty" in "\n".join(render(controller, 144, 42).plain_lines())
+
+
 def test_ascii_mode(controller):
     controller.config = replace(controller.config, ui=replace(controller.config.ui, ascii=True))
     text = "\n".join(render(controller, 144, 42).plain_lines())
@@ -163,13 +173,40 @@ def test_queue_enter_and_refresh_shortcut_keep_queue_focus(controller, monkeypat
     controller.pane = 1
     calls = []
     monkeypatch.setattr(controller, "refresh_queue_depth", lambda: calls.append("selected"))
+    monkeypatch.setattr(controller, "browse_queue", lambda: calls.append("messages"))
     monkeypatch.setattr(controller, "refresh_queue_depths", lambda: calls.append("all"))
     original = controller.current.selected_queue
     app.handle_key("ENTER")
-    assert calls == ["selected"] and controller.pane == 1
+    assert calls == ["selected", "messages"] and controller.pane == 1
     assert controller.current.selected_queue is original
     app.handle_key("r")
-    assert calls == ["selected", "all"] and controller.pane == 1
+    assert calls == ["selected", "messages", "all"] and controller.pane == 1
+    frame = app.last_frame = render(controller, 144, 42)
+    y = next(y for (name, y), index in frame.row_hits.items() if name == "queues" and index == controller.current.queue_index)
+    x = next(region[1] + 2 for region in frame.regions if region[0] == "queues")
+    app.handle_mouse(x, y, curses.BUTTON1_DOUBLE_CLICKED)
+    assert calls == ["selected", "messages", "all", "selected", "messages"] and controller.pane == 1
+
+
+def test_queue_navigation_clicks_and_filtering_never_submit_broker_requests(controller, monkeypatch):
+    app = TerminalApp(controller)
+    controller.pane = 1
+    calls = []
+    monkeypatch.setattr(controller, "_submit", lambda *args: calls.append(args))
+    for key in ("UP", "DOWN", "HOME", "END", "END"):
+        app.handle_key(key)
+        assert not controller.current.messages and not controller.current.messages_loaded
+        assert not controller.current.busy and not calls
+    frame = app.last_frame = render(controller, 144, 42)
+    y = next(y for (name, y), index in frame.row_hits.items() if name == "queues" and index != controller.current.queue_index)
+    x = next(region[1] + 2 for region in frame.regions if region[0] == "queues")
+    app.handle_mouse(x, y, curses.BUTTON1_CLICKED)
+    app.handle_key("/")
+    for char in "PAYMENTS":
+        app.handle_key(char)
+    app.handle_key("ENTER")  # Apply a queue filter, without activating the queue.
+    assert controller.current.selected_queue.name == "DEV.PAYMENTS"
+    assert not calls and not controller.current.messages and not controller.current.busy
 
 
 def test_routing_and_breadcrumb_line_removed(controller):
@@ -210,7 +247,7 @@ def test_selected_depth_loading_indicator_replaces_only_its_number(controller):
     state.depth_jobs = 1
     frame = render(controller, 144, 42)
     lines = frame.plain_lines()
-    depth_x = next(line.index("Depth") for line in lines if "Queue" in line and "Depth" in line)
+    depth_x = next(line.index("Depth") + 1 for line in lines if "Queue" in line and "Depth" in line)
     for (name, y), index in frame.row_hits.items():
         if name == "queues":
             assert lines[y][depth_x:depth_x + 5].strip() == ("..." if index == state.queue_index else str(state.queues[index].depth))

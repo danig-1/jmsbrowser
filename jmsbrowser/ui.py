@@ -1,11 +1,12 @@
 from __future__ import annotations
 
+from contextlib import suppress
 import curses
 import locale
 import time
 
 from .body_view import body_layout
-from .screen import MIN_PANEL_WIDTHS, PALETTE, ViewOptions, filtered_indices, panel_widths, render
+from .screen import MIN_PANEL_WIDTHS, PALETTE, ViewOptions, filtered_indices, panel_widths, queue_indices, render
 
 
 def navigation_key(key):
@@ -34,6 +35,8 @@ class TerminalApp:
             (controller.current.queues, controller.current.queue_index, lambda q: q.name),
             (controller.current.messages, controller.current.message_index, lambda m: f"{m.message_id} {m.type} {m.priority} {m.body}"),
         )[controller.pane]
+        if controller.pane == 1:
+            return queue_indices(items, self.view), selected
         return filtered_indices(items, self.view.filters[controller.pane], key), selected
 
     def select(self, index):
@@ -240,6 +243,7 @@ class TerminalApp:
                 c.connect()
             elif c.pane == 1:
                 c.refresh_queue_depth()
+                c.browse_queue()
             elif c.current.selected_message:
                 view.fullscreen = not view.fullscreen
         elif key == "d":
@@ -304,6 +308,13 @@ class TerminalApp:
             return
         if click:
             action, value = self.last_frame.action_at(x, y)
+            if action == "queue_sort":
+                self.controller.pane = 1
+                if buttons & (curses.BUTTON1_CLICKED | curses.BUTTON1_DOUBLE_CLICKED):
+                    view = self.view
+                    view.queue_sort_descending = not view.queue_sort_descending if view.queue_sort == value else False
+                    view.queue_sort = value
+                return
             if action == "detail_tab":
                 self.controller.pane = 2
                 self.select_detail_tab(value)
@@ -425,8 +436,25 @@ def draw_frame(window, frame, colors):
 
 
 def run(controller):
+    def run_screen(window):
+        try:
+            TerminalApp(controller).loop(window)
+        finally:
+            # PDCurses may leave the last frame in PowerShell's screen buffer.
+            # Erase it while curses still owns the terminal, before endwin().
+            with suppress(curses.error):
+                curses.mousemask(0)
+            with suppress(curses.error):
+                curses.curs_set(1)
+            with suppress(curses.error):
+                window.bkgd(" ", curses.A_NORMAL)
+                window.attrset(curses.A_NORMAL)
+            with suppress(curses.error):
+                window.clear()
+                window.refresh()
+
     try:
         locale.setlocale(locale.LC_ALL, "")
-        curses.wrapper(TerminalApp(controller).loop)
+        curses.wrapper(run_screen)
     finally:
         controller.close()

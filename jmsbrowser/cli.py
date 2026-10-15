@@ -82,6 +82,7 @@ def main(argv=None):
                 state.status, state.queues = "connected", queues
                 state.queue_index = next((i for i, q in enumerate(queues) if selected and q.name == selected.name), 0)
                 state.messages = [Message.from_dict(m) for m in messages]
+                state.messages_loaded = True
                 controller.notice = "Messages remain on the queue. Size = payload bytes."
                 if not 120 <= args.width <= 400 or not 28 <= args.height <= 200:
                     raise ValueError("Screenshot dimensions must be 120–400 columns and 28–200 rows.")

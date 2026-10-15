@@ -3,9 +3,12 @@ import queue
 import threading
 import time
 
+import pytest
+
 from jmsbrowser.config import Config, ConnectionConfig
 from jmsbrowser.domain import Consumer, ConsumerSnapshot, Message, QueueInfo
 from jmsbrowser.state import Controller
+from jmsbrowser.ui import TerminalApp
 
 
 class FakeClient:
@@ -49,6 +52,69 @@ def wait_until(controller, predicate):
     raise AssertionError("Background operation did not complete")
 
 
+def test_queue_selection_waits_for_enter_and_repeated_enter_coalesces_requests(monkeypatch):
+    monkeypatch.setattr("jmsbrowser.state.WorkerClient", FakeClient)
+    FakeClient.release.set()
+    controller = Controller(Config((ConnectionConfig("Test", "artemis"),)))
+    app = TerminalApp(controller)
+    try:
+        controller.connect()
+        wait_until(controller, lambda: not controller.current.busy)
+        state = controller.current
+        assert state.client.calls == [("connect", {})]
+        assert not state.messages and not state.messages_loaded
+        controller.pane = 1
+        app.handle_key("DOWN")
+        assert state.selected_queue.name == "B"
+        assert state.client.calls == [("connect", {})] and not state.busy
+        app.handle_key("ENTER")
+        app.handle_key("ENTER")
+        wait_until(controller, lambda: not state.busy and not state.depth_jobs)
+        assert [(op, options.get("queue")) for op, options in state.client.calls] == [
+            ("connect", None), ("queue_depth", "B"), ("browse", "B")]
+        assert state.messages[0].message_id == "ID:B" and state.messages_loaded
+        assert controller.pane == 1
+    finally:
+        controller.close()
+
+
+@pytest.mark.parametrize("opened", [False, True])
+def test_general_refresh_reloads_messages_only_for_an_opened_queue(monkeypatch, opened):
+    monkeypatch.setattr("jmsbrowser.state.WorkerClient", FakeClient)
+    FakeClient.release.set()
+    controller = Controller(Config((ConnectionConfig("Test", "artemis"),)))
+    try:
+        controller.connect()
+        wait_until(controller, lambda: not controller.current.busy)
+        state = controller.current
+        if opened:
+            controller.browse_queue()
+            wait_until(controller, lambda: not state.busy)
+        state.client.calls.clear()
+        controller.refresh()
+        wait_until(controller, lambda: not state.busy)
+        assert [op for op, _ in state.client.calls] == (["queues", "browse"] if opened else ["queues"])
+        assert state.messages_loaded == opened
+        assert bool(state.messages) == opened
+    finally:
+        controller.close()
+
+
+def test_explicit_initial_queue_still_loads_its_messages(monkeypatch):
+    monkeypatch.setattr("jmsbrowser.state.WorkerClient", FakeClient)
+    controller = Controller(Config((ConnectionConfig("Test", "artemis"),)))
+    try:
+        controller.initial_queue = "B"
+        controller.connect()
+        wait_until(controller, lambda: not controller.current.busy)
+        state = controller.current
+        assert state.selected_queue.name == "B"
+        assert state.messages_loaded and state.messages[0].message_id == "ID:B"
+        assert [op for op, _ in state.client.calls] == ["connect", "browse"]
+    finally:
+        controller.close()
+
+
 def test_stale_browse_cannot_replace_new_queue_selection(monkeypatch):
     monkeypatch.setattr("jmsbrowser.state.WorkerClient", FakeClient)
     FakeClient.pending.clear()
@@ -56,10 +122,18 @@ def test_stale_browse_cannot_replace_new_queue_selection(monkeypatch):
     controller = Controller(Config((ConnectionConfig("Test", "artemis"),)))
     try:
         controller.connect()
+        wait_until(controller, lambda: not controller.current.busy)
+        controller.browse_queue()
         wait_until(controller, lambda: FakeClient.pending.is_set())
         controller.select_queue(1)
         assert controller.current.selected_queue.name == "B"
         FakeClient.release.set()
+        controller.current.executor.submit(lambda: None).result(timeout=3)
+        controller.poll()
+        assert not controller.current.messages and not controller.current.messages_loaded
+        assert not controller.current.busy
+        assert [options["queue"] for op, options in controller.current.client.calls if op == "browse"] == ["A"]
+        controller.browse_queue()
         wait_until(controller, lambda: not controller.current.busy)
         assert controller.current.messages[0].message_id == "ID:B"
         controller.disconnect()
@@ -77,6 +151,8 @@ def test_provider_connection_loss_clears_connected_dot(monkeypatch):
     try:
         controller.connect()
         wait_until(controller, lambda: not controller.current.busy)
+        controller.browse_queue()
+        wait_until(controller, lambda: not controller.current.busy)
         controller.current.client.events.put({"event": "connection_error", "error": "Connection lost"})
         controller.poll()
         assert controller.current.status == "error"
@@ -92,6 +168,8 @@ def test_all_depth_refresh_preserves_messages_without_rebrowsing(monkeypatch):
     controller = Controller(Config((ConnectionConfig("Test", "artemis"),)))
     try:
         controller.connect()
+        wait_until(controller, lambda: not controller.current.busy)
+        controller.browse_queue()
         wait_until(controller, lambda: not controller.current.busy)
         state = controller.current
         client = state.client
@@ -119,6 +197,8 @@ def test_selected_depth_refresh_does_not_query_or_update_other_queues(monkeypatc
     try:
         controller.connect()
         wait_until(controller, lambda: not controller.current.busy)
+        controller.browse_queue()
+        wait_until(controller, lambda: not controller.current.busy)
         state = controller.current
         client = state.client
         messages = state.messages
@@ -127,7 +207,7 @@ def test_selected_depth_refresh_does_not_query_or_update_other_queues(monkeypatc
         controller.pane = 1
         controller.refresh_queue_depth()
         assert state.depth_pending == {"A"}
-        controller.refresh_queue_depth()  # repeated Enter coalesces only this queue
+        controller.refresh_queue_depth()  # repeated requests coalesce only this queue
         wait_until(controller, lambda: not state.depth_jobs)
         assert client.calls == [("queue_depth", {"queue": "A"})]
         assert {q.name: q.depth for q in state.queues} == {"A": 8, "B": 1}
@@ -158,7 +238,8 @@ def test_depth_result_updates_original_queue_after_selection_changes(monkeypatch
         release.set()
         wait_until(controller, lambda: not controller.current.busy and not controller.current.depth_jobs)
         assert controller.current.selected_queue.name == "B"
-        assert controller.current.messages[0].message_id == "ID:B"
+        assert not controller.current.messages and not controller.current.messages_loaded
+        assert not any(op == "browse" for op, _ in controller.current.client.calls)
         assert {q.name: q.depth for q in controller.current.queues} == {"A": 8, "B": 1}
     finally:
         release.set()
@@ -201,6 +282,8 @@ def test_consumer_refresh_preserves_message_selection_and_only_queries_metadata(
     try:
         controller.connect()
         wait_until(controller, lambda: not controller.current.busy)
+        controller.browse_queue()
+        wait_until(controller, lambda: not controller.current.busy)
         state = controller.current
         messages = state.messages
         state.client.calls.clear()
@@ -224,6 +307,8 @@ def test_consumer_permission_error_does_not_disconnect_browsing(monkeypatch):
     controller = Controller(Config((ConnectionConfig("Test", "artemis"),)))
     try:
         controller.connect()
+        wait_until(controller, lambda: not controller.current.busy)
+        controller.browse_queue()
         wait_until(controller, lambda: not controller.current.busy)
         messages = controller.current.messages
         controller.refresh_consumers()
@@ -259,6 +344,7 @@ def test_delayed_consumers_are_discarded_on_queue_change_and_duplicates_coalesce
         controller.refresh_consumers()
         controller.select_queue(1)
         release.set()
+        state.executor.submit(lambda: None).result(timeout=3)
         wait_until(controller, lambda: not state.busy)
         assert state.selected_queue.name == "B"
         assert state.consumer_snapshot is None and state.consumer_status == "idle"

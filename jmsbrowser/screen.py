@@ -31,6 +31,8 @@ def panel_widths(width, requested=None):
 @dataclass
 class ViewOptions:
     filters: list[str] = field(default_factory=lambda: ["", "", ""])
+    queue_sort: str = "name"
+    queue_sort_descending: bool = False
     fullscreen: bool = False
     prompt: str | None = None
     horizontal_scroll: int = 0
@@ -127,6 +129,17 @@ def filtered_indices(items, query, key):
     return [index for index, item in enumerate(items) if not query or query in key(item).casefold()]
 
 
+def queue_indices(queues, view):
+    indices = filtered_indices(queues, view.filters[1], lambda q: q.name)
+    indices.sort(key=lambda index: (queues[index].name.casefold(), queues[index].name))
+    if view.queue_sort == "depth":
+        # Keep equal-depth queues alphabetical in either direction.
+        indices.sort(key=lambda index: queues[index].depth, reverse=view.queue_sort_descending)
+    elif view.queue_sort_descending:
+        indices.reverse()
+    return indices
+
+
 def page(indices, selected, count):
     position = indices.index(selected) if selected in indices else 0
     start = position // count * count
@@ -172,7 +185,12 @@ def draw_detail(frame, state, controller, view, x, y, width, height):
         return
     message = state.selected_message
     if message is None:
-        text = "Loading messages…" if state.busy else ("Queue is empty." if state.selected_queue else "Select a connected server and queue.")
+        if state.busy:
+            text = "Loading messages…"
+        elif state.selected_queue:
+            text = "Queue is empty." if state.messages_loaded else "Press Enter on a queue to load messages."
+        else:
+            text = "Select a connected server and queue."
         if state.error:
             text = state.error
         frame.text(x + 1, y + 1, text, "error" if state.error else "muted", width=width - 2)
@@ -319,7 +337,8 @@ def render(controller, width, height, view=None):
     state = controller.current
     frame.fill(0, 0, width, bg="bar")
     frame.text(2, 0, "JMS BROWSER", "accent", "bar")
-    frame.text(17, 0, "Payload reader" + ("  /  DEMO" if controller.demo else ""), bg="bar")
+    if controller.demo:
+        frame.text(17, 0, "DEMO", bg="bar")
     frame.text(width - 15, 0, "NON-CONSUMING", "green", "bar")
     panel_y, panel_h = 2, height - 6
     if view.fullscreen:
@@ -356,9 +375,13 @@ def render(controller, width, height, view=None):
         qx = left + 3
         if view.filters[1]:
             frame.text(qx, panel_y + 1, "/ " + view.filters[1], "accent", width=middle - 4)
-        frame.text(qx, panel_y + 2, "Queue", "muted")
-        frame.text(qx + middle - 9, panel_y + 2, "Depth", "muted")
-        indices = filtered_indices(state.queues, view.filters[1], lambda q: q.name)
+        for column, title, x in (("name", "Queue", qx), ("depth", "Depth", qx + middle - 10)):
+            active = view.queue_sort == column
+            arrow = "↓" if view.queue_sort_descending else "↑"
+            label = title + (" " + arrow if active else "")
+            frame.text(x, panel_y + 2, label, "accent" if active else "muted", width=7)
+            frame.actions.append(("queue_sort", column, x, panel_y + 2, 7))
+        indices = queue_indices(state.queues, view)
         visible, start = page(indices, state.queue_index, max(1, panel_h - 7))
         for offset, index in enumerate(visible):
             item, y = state.queues[index], panel_y + 4 + offset
@@ -423,7 +446,7 @@ def render(controller, width, height, view=None):
         if controller.detail_tab == 0:
             footer = "Tab/click tabs  ↑↓/PgUp/PgDn scroll  w wrap  s color  n compose  c consumers  r refresh  Esc back  q quit"
     else:
-        footer = "Tab/click panels  ↑↓ select  Enter connect/depth/detail  n compose  c consumers  r refresh  h tabs  / filter  q quit"
+        footer = "Tab/click panels  ↑↓ select  Enter connect/browse/detail  n compose  c consumers  r refresh  h tabs  / filter  q quit"
     frame.text(1, height - 1, footer, "accent", "bar", width - 2)
     if view.consumer_inspector:
         draw_consumer_inspector(frame, controller, view)

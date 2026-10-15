@@ -231,11 +231,19 @@ class ArtemisAdapter(JMSAdapter):
                 if routing.startswith('"'):
                     routing = str(ObjectName.unquote(routing))
                 queues.append((name, mbean, routing.upper()))
-        self.queue_mbeans = {name: mbean for name, mbean, _ in queues}
+        self.queue_mbeans = {}
         if not queues:
             return []
-        depths = self.jolokia([{"type": "read", "mbean": mbean, "attribute": "MessageCount"} for _, mbean, _ in queues])
-        return sorted([QueueInfo(name, int(depth["value"]), routing) for (name, _, routing), depth in zip(queues, depths)], key=lambda q: q.name)
+        metadata = self.jolokia([{"type": "read", "mbean": mbean, "attribute": ["MessageCount", "Temporary"]}
+                                 for _, mbean, _ in queues])
+        visible = []
+        for (name, mbean, routing), response in zip(queues, metadata):
+            attributes = response["value"]
+            if attributes["Temporary"]:
+                continue
+            self.queue_mbeans[name] = mbean
+            visible.append(QueueInfo(name, int(attributes["MessageCount"]), routing))
+        return sorted(visible, key=lambda q: q.name)
 
     def queue_depth(self, queue_name):
         mbean = self.queue_mbeans[queue_name]

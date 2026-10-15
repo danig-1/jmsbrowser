@@ -31,6 +31,7 @@ class ConnectionState:
     error: str = ""
     queues: list[QueueInfo] = field(default_factory=list)
     messages: list[Message] = field(default_factory=list)
+    messages_loaded: bool = False
     queue_index: int = 0
     message_index: int = 0
     generation: int = 0
@@ -107,6 +108,7 @@ class Controller:
         state.depth_pending.clear()
         state.all_depths_pending = False
         state.queues, state.messages = [], []
+        state.messages_loaded = False
         state.clear_consumers()
 
     def select_connection(self, index):
@@ -118,16 +120,24 @@ class Controller:
         if not state.queues:
             return
         index = max(0, min(index, len(state.queues) - 1))
-        if index == state.queue_index and state.messages:
+        if index == state.queue_index:
             return
-        if index != state.queue_index:
-            state.clear_consumers()
+        state.clear_consumers()
         state.queue_index = index
-        state.messages, state.message_index = [], 0
+        state.messages, state.message_index, state.messages_loaded = [], 0, False
         state.generation += 1
+        state.busy = False
         self.detail_scroll = 0
+        self.notice = f"{state.selected_queue.name}: press Enter to load messages."
+
+    def browse_queue(self, index=None):
+        index = self.connection_index if index is None else index
+        state = self.connections[index]
+        if state.status != "connected" or not state.selected_queue or state.busy:
+            return
+        state.generation += 1
         state.busy = True
-        self._submit(self.connection_index, "browse")
+        self._submit(index, "browse")
 
     def select_message(self, index):
         self.current.message_index = max(0, min(index, len(self.current.messages) - 1))
@@ -298,9 +308,11 @@ class Controller:
                     state.clear_consumers()
                     state.generation += 1
                     state.messages, state.message_index, state.busy = [], 0, False
+                    state.messages_loaded = False
                 self.notice = f"{state.config.name}: refreshed all {len(state.queues)} queue depths."
             elif operation in ("connect", "queues"):
                 previous = state.selected_queue.name if state.selected_queue else None
+                requested = None
                 state.status, state.error = "connected", ""
                 state.queues = [QueueInfo(**item) for item in value]
                 state.queue_index = next((i for i, q in enumerate(state.queues) if q.name == previous), 0)
@@ -312,16 +324,17 @@ class Controller:
                     self.initial_queue = None
                 if not state.selected_queue or state.selected_queue.name != previous:
                     state.clear_consumers()
+                    state.messages, state.message_index, state.messages_loaded = [], 0, False
                 state.generation += 1
-                state.busy = bool(state.queues)
-                if state.queues:
-                    self._submit(index, "browse")
-                else:
-                    state.messages = []
+                if state.selected_queue and (requested or state.messages_loaded):
+                    self.browse_queue(index)
                 self.notice = f"{state.config.name}: {len(state.queues)} queues."
+                if state.selected_queue and not state.messages_loaded and not state.busy:
+                    self.notice += " Press Enter on a queue to load messages."
             else:
                 previous = state.selected_message.message_id if state.selected_message else None
                 state.messages = [Message.from_dict(item) for item in value]
+                state.messages_loaded = True
                 state.message_index = next((i for i, m in enumerate(state.messages) if m.message_id == previous), 0)
                 self.notice = f"{state.config.name}: loaded {len(state.messages)} messages; queue unchanged."
         # Clear earlier read results before scheduling post-send refreshes.
