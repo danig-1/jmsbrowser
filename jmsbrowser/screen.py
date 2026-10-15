@@ -3,6 +3,7 @@ from __future__ import annotations
 
 from dataclasses import dataclass, field
 import textwrap
+import time
 
 from wcwidth import wcwidth, wcswidth
 
@@ -48,6 +49,11 @@ class ViewOptions:
     drag_divider: int | None = None
     body_wrap: bool = True
     body_colors: bool = True
+    copy_identity: tuple | None = None
+    copy_feedback: str = ""
+    copy_error: bool = False
+    copy_until: float = 0
+    copy_flash_until: float = 0
 
 
 class Frame:
@@ -182,6 +188,13 @@ def draw_metadata(frame, entries, x, y, width, height, scroll=0, horizontal=0, e
     return start, rows
 
 
+def detail_identity(controller):
+    state = controller.current
+    message, queue = state.selected_message, state.selected_queue
+    return (controller.connection_index, state.epoch, queue.name if queue else None,
+            message.message_id, id(message), controller.detail_tab) if message else None
+
+
 def draw_detail(frame, state, controller, view, x, y, width, height):
     if height < 4:
         return
@@ -207,38 +220,46 @@ def draw_detail(frame, state, controller, view, x, y, width, height):
         frame.actions.append(("detail_tab", index, tab_x, y, len(label)))
         tab_x += len(label) + 3
     frame.text(x + 1, y + 2, f"MessageId: {message.message_id}", "muted", width=width - 2)
+    identity = detail_identity(controller)
+    now = time.monotonic()
+    if view.copy_identity == identity and now < view.copy_until:
+        frame.text(x + 1, y + 1, view.copy_feedback, "error" if view.copy_error else "accent", width=width - 2)
     if controller.detail_tab in (1, 2):
         lines = message.metadata(controller.detail_tab)
         start, rows = draw_metadata(frame, lines, x + 1, y + 4, width - 2, height - 5,
                                     controller.detail_scroll, view.horizontal_scroll,
                                     "No headers." if controller.detail_tab == 1 else "No properties.")
         unit = "rows"
+        data_x, data_y, data_width = x + 1, y + 6, width - 2
     else:
-        layout = body_layout(message.body, message.type, message.truncated, width - 8, view.body_wrap)
+        wrap = view.fullscreen or view.body_wrap
+        colors = view.fullscreen or view.body_colors
+        layout = body_layout(message.body, message.type, message.truncated, width - 8, wrap)
         lines = layout.rows
-        # Body controls use fixed slots and do not change the detail tab positions.
         frame.fill(x + 1, y + 2, width - 2)
         frame.text(x + 1, y + 2, layout.format, "muted", width=6)
-        cursor = x + 8
-        for action, label, enabled, shortcut in (("body_wrap", "Wrap", view.body_wrap, "w"),
-                                                  ("body_colors", "Color", view.body_colors, "s")):
-            text = f" {label}: {'on' if enabled else 'off':<3} ({shortcut}) "
-            frame.text(cursor, y + 2, text, "accent" if enabled else "muted", "selected" if enabled else "bar")
-            frame.actions.append((action, None, cursor, y + 2, len(text)))
-            cursor += len(text) + 2
+        if not view.fullscreen:
+            # Inline controls use fixed slots without moving the detail tabs.
+            cursor = x + 8
+            for action, label, enabled, shortcut in (("body_wrap", "Wrap", view.body_wrap, "w"),
+                                                      ("body_colors", "Color", view.body_colors, "s")):
+                text = f" {label}: {'on' if enabled else 'off':<3} ({shortcut}) "
+                frame.text(cursor, y + 2, text, "accent" if enabled else "muted", "selected" if enabled else "bar")
+                frame.actions.append((action, None, cursor, y + 2, len(text)))
+                cursor += len(text) + 2
         rows = max(1, height - 6)
         start = min(controller.detail_scroll, max(0, len(lines) - rows))
         for row, line in enumerate(lines[start:start + rows]):
             label = "   >" if line.continuation else f"{line.number:>4}"
             frame.text(x + 1, y + 4 + row, label, "muted", width=5)
-            offset = 0 if view.body_wrap else cell_offset(line.text, view.horizontal_scroll)
+            offset = 0 if wrap else cell_offset(line.text, view.horizontal_scroll)
             # Only paint the visible cells plus an ellipsis probe. A large,
             # unwrapped XML line can contain thousands of off-screen tokens.
             end = offset + cell_offset(line.text[offset:], width - 7)
             visible = line.text[offset:end]
             frame.text(x + 7, y + 4 + row, visible, "text", width=width - 8)
             paint_width = width - 8 - (1 if wcswidth(visible) > width - 8 else 0)
-            if view.body_colors:
+            if colors:
                 for left, right, role in line.spans:
                     left = max(left, offset)
                     if left >= end:
@@ -253,7 +274,15 @@ def draw_detail(frame, state, controller, view, x, y, width, height):
                         cell_x, cell_y = x + 7 + column, y + 4 + row
                         char, _, bg = frame.cells[cell_y][cell_x]
                         frame.cells[cell_y][cell_x] = char, role, bg
-        unit = "rows" if view.body_wrap else "lines"
+        unit = "rows" if wrap else "lines"
+        data_x, data_y, data_width = x + 7, y + 4, width - 8
+    for row in range(len(lines[start:start + rows])):
+        frame.actions.append(("copy_detail", identity, data_x, data_y + row, data_width))
+    if view.copy_identity == identity and now < view.copy_flash_until:
+        for row in range(data_y, min(data_y + rows, frame.height, y + height - 1)):
+            for column in range(data_x, min(data_x + data_width, frame.width)):
+                char, _, _ = frame.cells[row][column]
+                frame.cells[row][column] = char, "bg", "accent"
     frame.detail_height = rows
     frame.detail_total_rows = len(lines)
     footer = f"{message.type}  ·  priority {message.priority}  ·  {format_size(message.size)}"
@@ -446,8 +475,6 @@ def render(controller, width, height, view=None):
         footer = "c refresh consumers  ↑↓ select/scroll  Enter details  Tab controls  Esc back  q quit"
     elif view.fullscreen:
         footer = "Tab/Shift+Tab/click tabs  ↑↓/PgUp/PgDn scroll  n compose  c consumers  r refresh  Esc back  q quit"
-        if controller.detail_tab == 0:
-            footer = "Tab/click tabs  ↑↓/PgUp/PgDn scroll  w wrap  s color  n compose  c consumers  r refresh  Esc back  q quit"
     else:
         footer = "Tab/click panels  ↑↓ select  Enter connect/browse/detail  n compose  c consumers  r refresh  h tabs  / filter  q quit"
     frame.text(1, height - 1, footer, "accent", "bar", width - 2)

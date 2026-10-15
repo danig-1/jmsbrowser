@@ -1,7 +1,8 @@
 import sys
 from types import SimpleNamespace
 import pytest
-from jmsbrowser.brokers import extract_message
+from jmsbrowser.brokers import JMSAdapter, extract_message
+from jmsbrowser.config import ConnectionConfig
 
 
 class Enumeration:
@@ -104,3 +105,58 @@ def test_unknown_encoded_sizes_are_honest_and_object_is_not_deserialized(source,
         assert "hello" in message.body and "42" in message.body
     else:
         assert "not deserialized" in message.body
+
+
+@pytest.mark.parametrize("source,expected", [(Text(), "é🙂abc"), (Bytes(), "00 01 7f 80 fe ff"),
+                                             (Map(), '"count": 3'), (Stream(), 'true'), (Object(), "not deserialized")])
+def test_unbounded_copy_read_is_complete_for_each_supported_body_type(source, expected):
+    full = extract_message(source, None)
+    assert expected in full.body and not full.truncated
+
+
+def test_full_message_uses_escaped_id_selector_and_closes_browser_on_success_and_error():
+    class Browser:
+        closed = False
+        values = [Text()]
+        def getEnumeration(self):
+            return Enumeration(self.values)
+        def close(self):
+            self.closed = True
+
+    browser, calls = Browser(), []
+    adapter = JMSAdapter(ConnectionConfig("test", "artemis"))
+    adapter.session = SimpleNamespace(createQueue=lambda name: name,
+                                      createBrowser=lambda *args: (calls.append(args), browser)[1])
+    message = adapter.full_message("TEST", "ID:test")
+    assert message.body == "é🙂abc" and not message.truncated and browser.closed
+    assert calls == [("TEST", "JMSMessageID = 'ID:test'")]
+    browser.closed = False
+    browser.values = []
+    with pytest.raises(ValueError, match="no longer"):
+        adapter.full_message("TEST", "ID:one'two")
+    assert calls[-1] == ("TEST", "JMSMessageID = 'ID:one''two'") and browser.closed
+    with pytest.raises(ValueError, match="no MessageId"):
+        adapter.full_message("TEST", "")
+    browser.values = [Text()]
+    with pytest.raises(ValueError, match="different MessageId"):
+        adapter.full_message("TEST", "ID:other")
+    assert browser.closed
+
+
+def test_map_and_stream_copy_include_large_binary_fields_and_all_later_values():
+    class JavaBytes(list):
+        def getClass(self):
+            return SimpleNamespace(getName=lambda: "[B")
+    binary = JavaBytes([1, 127, -1] * 5000)
+    class BinaryMap(Map):
+        def getObject(self, name):
+            return binary if name == "name" else "last field"
+    class BinaryStream(Stream):
+        def reset(self):
+            self.values = iter([binary, "last field"])
+    for source in (BinaryMap(), BinaryStream()):
+        preview = extract_message(source, 20000)
+        assert preview.truncated
+        full = extract_message(source, None)
+        assert not full.truncated and "last field" in full.body
+        assert "017fff" * 5000 in full.body

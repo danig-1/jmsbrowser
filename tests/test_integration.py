@@ -41,6 +41,21 @@ def test_actual_application_browses_every_fixture_without_consuming(index):
         assert before == after
 
 
+@pytest.mark.parametrize("index", [0, 1], ids=["artemis", "ibm"])
+def test_full_message_copy_read_preserves_queue_depth_and_ids(index):
+    connection = replace(load_config(ROOT / "config.example.yaml").connections[index], timeout_seconds=30)
+    with WorkerClient(connection) as client:
+        client.request("connect")
+        before = client.request("queue_depth", queue="DEV.ORDERS")
+        first = client.request("browse", queue="DEV.ORDERS", limit=100, max_body_bytes=10)
+        assert first and first[0]["truncated"]
+        full = client.request("full_message", queue="DEV.ORDERS", message_id=first[0]["message_id"])
+        assert not full["truncated"] and len(full["body"].encode()) == full["size"] > 10
+        assert full["headers"] == first[0]["headers"] and full["properties"] == first[0]["properties"]
+        assert client.request("queue_depth", queue="DEV.ORDERS") == before
+        assert client.request("browse", queue="DEV.ORDERS", limit=100, max_body_bytes=10) == first
+
+
 def test_offline_worker_does_not_require_java_or_credentials(monkeypatch):
     from jmsbrowser.config import ConnectionConfig
     monkeypatch.setenv("JAVA_HOME", "does-not-exist")

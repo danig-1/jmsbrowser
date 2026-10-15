@@ -100,20 +100,34 @@ The active panel has a bright title and an arrow on its selected row. Selections
 in other panels stay visible with a quieter background. Mouse movement alone
 does not change keyboard focus.
 
-Both Body views support soft wrapping and JSON/XML syntax colors, enabled by
-default. Click the Wrap / Color controls or press **w** / **s** while Body is
-selected in the message panel. Wrapped continuations use `>` instead of repeating
+Both Body views use soft wrapping and JSON/XML syntax colors by default.
+Expanded message detail always keeps wrapping and colors on and has no toggles.
+In inline Body detail, click the Wrap / Color controls or press **w** / **s**
+to change these settings. Wrapped continuations use `>` instead of repeating
 the line number; scrolling counts the displayed rows. Disable wrapping to scroll
 long lines horizontally with **[** / **]**. JSON keeps its existing display
 formatting; XML retains its line structure and receives token colors. Plain text
-and invalid JSON remain readable text. These display settings apply across
+and invalid JSON remain readable text. Inline display settings apply across
 messages for the session and leave the message body, headers and properties
 unchanged.
+
+Click the data inside Body, Headers or Properties to copy that entire section
+to the desktop clipboard. A brief flash and “Copied to clipboard” confirm the
+copy in both inline and expanded details. Tabs only navigate; clicking them
+does not copy. Scrolling, wrapping, colors and the visible area do not limit
+what is copied. Body copies the original text (without display line numbers or
+JSON prettification); headers and properties copy the complete key/value table.
+If a body exceeds the preview limit, the application re-reads that message with
+a non-consuming QueueBrowser before copying. Switching messages or tabs cancels
+a pending copy. An unavailable message or clipboard shows a copy error in the
+detail section. Windows uses its native clipboard and macOS uses `pbcopy`; Linux
+requires `wl-clipboard` on Wayland or `xclip` / `xsel` on X11.
 
 | Key | Action |
 | --- | --- |
 | Tab / Shift+Tab | Change panel focus; in expanded detail, cycle detail tabs |
 | Mouse click | Focus panels, select rows, activate detail tabs or inspector controls |
+| Click detail data | Copy the complete Body, Headers or Properties section and briefly flash it |
 | Click Queue / Depth header | Sort queues by name / numeric depth; click the same header again to reverse |
 | Mouse drag on a vertical divider | Resize the adjacent panels |
 | Double-click a divider / Escape during drag | Reset widths / cancel the drag |
@@ -124,7 +138,7 @@ unchanged.
 | d | Disconnect selected server |
 | PgUp / PgDn, mouse wheel over detail | Scroll payload / headers / properties |
 | [ / ] | Scroll long detail lines horizontally; disable Body wrapping first |
-| w / s in Body | Toggle soft wrapping / syntax colors, in either detail layout |
+| w / s in inline Body | Toggle soft wrapping / syntax colors; expanded detail always keeps both on |
 | h | Cycle Headers / Properties / Body |
 | /, Enter | Edit and apply a filter for the focused panel |
 | Escape | Return from full screen or clear focused filter |

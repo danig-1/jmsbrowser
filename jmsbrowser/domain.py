@@ -108,6 +108,17 @@ class Message:
     def metadata(self, tab):
         return metadata_rows(self.headers if tab == 1 else self.properties, timestamp=tab == 1)
 
+    def copy_text(self, tab):
+        """Copy source text or the complete metadata table, independent of layout."""
+        return self.body if tab == 0 else self.detail(tab)
+
+    def copy_requires_fetch(self, tab):
+        if tab == 0:
+            return self.truncated
+        values = self.headers if tab == 1 else self.properties
+        return any(isinstance(value, dict) and value.get("type") == "bytes" and value.get("truncated")
+                   for value in values.values())
+
 
 def format_size(size: int | None) -> str:
     return "n/a" if size is None else f"{size:,} B"

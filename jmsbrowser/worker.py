@@ -46,6 +46,8 @@ def main():
                     result = adapter.consumers(request["queue"]).to_dict()
                 elif operation == "browse":
                     result = [message.to_dict() for message in adapter.browse(request["queue"], request["limit"], request["max_body_bytes"])]
+                elif operation == "full_message":
+                    result = adapter.full_message(request["queue"], request["message_id"]).to_dict()
                 elif operation == "send":
                     try:
                         if request["queue"] not in known_queues:

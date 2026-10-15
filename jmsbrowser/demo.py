@@ -62,9 +62,16 @@ class DemoAdapter:
             mid = f"ID:demo-{self.config.type}-{queue_name}-{index + 1:04}"
             messages.append(Message(mid, "TextMessage", 4, body.encode()[:max_body_bytes].decode(errors="ignore"), size,
                                     {"JMSMessageID": mid, "JMSPriority": 4, "JMSDeliveryMode": 2, "JMSExpiration": 0},
-                                    {"source": "demo"}, size > max_body_bytes))
+                                    {"source": "demo"}, max_body_bytes is not None and size > max_body_bytes))
         for message in self.live_sent(queue_name)[:max(0, limit - len(messages))]:
             from dataclasses import replace
             preview = message.body.encode()[:max_body_bytes].decode(errors="ignore")
-            messages.append(replace(message, body=preview, truncated=message.size > max_body_bytes))
+            messages.append(replace(message, body=preview, truncated=max_body_bytes is not None and message.size > max_body_bytes))
         return messages
+
+    def full_message(self, queue_name, message_id):
+        messages = self.browse(queue_name, limit=len(self.payloads[queue_name]) + len(self.sent[queue_name]), max_body_bytes=None)
+        for message in messages:
+            if message.message_id == message_id:
+                return message
+        raise ValueError("Message is no longer on the queue; nothing was copied.")

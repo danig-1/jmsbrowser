@@ -27,13 +27,21 @@ def java_value(value, limit=4096):
         return float(value.doubleValue())
     if name == "[B":
         size = len(value)
-        return {"type": "bytes", "size": size, "hex": bytes(int(v) & 255 for v in value[:limit]).hex(), "truncated": size > limit}
+        return {"type": "bytes", "size": size, "hex": bytes(int(v) & 255 for v in value[:limit]).hex(), "truncated": limit is not None and size > limit}
     return str(value)
 
 
 def bounded_text(text, limit):
     encoded = text.encode("utf-8")
-    return encoded[:limit].decode("utf-8", errors="ignore"), len(encoded), len(encoded) > limit
+    return encoded[:limit].decode("utf-8", errors="ignore"), len(encoded), limit is not None and len(encoded) > limit
+
+
+def payload_value(value, limit):
+    value = java_value(value, limit=None if limit is None else min(limit, 4096))
+    if isinstance(value, str):
+        return value[:limit], limit is not None and len(value) > limit
+    truncated = isinstance(value, dict) and value.get("type") == "bytes" and value.get("truncated", False)
+    return value, truncated
 
 
 def extract_message(message, limit):
@@ -41,12 +49,12 @@ def extract_message(message, limit):
     J = jpype.JClass
     headers = {}
     for key in ("JMSMessageID", "JMSType", "JMSPriority", "JMSTimestamp", "JMSExpiration", "JMSDeliveryMode", "JMSRedelivered", "JMSCorrelationID", "JMSReplyTo", "JMSDestination"):
-        headers[key] = java_value(getattr(message, "get" + key)())
+        headers[key] = java_value(getattr(message, "get" + key)(), limit=None if limit is None else 4096)
     properties = {}
     names = message.getPropertyNames()
     while names.hasMoreElements():
         name = str(names.nextElement())
-        properties[name] = java_value(message.getObjectProperty(name))
+        properties[name] = java_value(message.getObjectProperty(name), limit=None if limit is None else 4096)
     truncated, size = False, None
     note = "Payload bytes; text measured as UTF-8. Excludes headers."
     if isinstance(message, J("javax.jms.TextMessage")):
@@ -57,8 +65,9 @@ def extract_message(message, limit):
         size = int(message.getBodyLength())
         message.reset()
         raw = bytearray()
-        while len(raw) < min(size, limit):
-            buffer = jpype.JArray(jpype.JByte)(min(8192, min(size, limit) - len(raw)))
+        read_size = size if limit is None else min(size, limit)
+        while len(raw) < read_size:
+            buffer = jpype.JArray(jpype.JByte)(min(8192, read_size - len(raw)))
             count = int(message.readBytes(buffer))
             if count <= 0:
                 break
@@ -69,30 +78,30 @@ def extract_message(message, limit):
         kind, values = "MapMessage", {}
         names = message.getMapNames()
         used = 0
-        while names.hasMoreElements() and used < limit:
+        while names.hasMoreElements() and (limit is None or used < limit):
             name = str(names.nextElement())
-            value = java_value(message.getObject(name), limit=min(limit, 4096))
-            value = value[:limit] if isinstance(value, str) else value
+            value, value_truncated = payload_value(message.getObject(name), limit)
+            truncated |= value_truncated
             values[name] = value
             used += len(json.dumps({name: value}, ensure_ascii=False).encode("utf-8"))
         text = json.dumps(values, indent=2, ensure_ascii=False)
         body, _, clipped = bounded_text(text, limit)
-        truncated = clipped or bool(names.hasMoreElements())
+        truncated |= clipped or bool(names.hasMoreElements())
         note = "n/a: JMS does not expose the encoded MapMessage payload size."
     elif isinstance(message, J("javax.jms.StreamMessage")):
         kind, values, used = "StreamMessage", [], 0
         message.reset()
-        while used < limit:
+        while limit is None or used < limit:
             try:
-                value = java_value(message.readObject(), limit=min(limit, 4096))
+                value, value_truncated = payload_value(message.readObject(), limit)
             except J("javax.jms.MessageEOFException"):
                 break
-            value = value[:limit] if isinstance(value, str) else value
+            truncated |= value_truncated
             values.append(value)
             used += len(json.dumps(value, ensure_ascii=False).encode("utf-8"))
         text = json.dumps(values, indent=2, ensure_ascii=False)
         body, _, clipped = bounded_text(text, limit)
-        truncated = clipped or used >= limit
+        truncated |= clipped or (limit is not None and used >= limit)
         note = "n/a: JMS does not expose the encoded StreamMessage payload size."
     elif isinstance(message, J("javax.jms.ObjectMessage")):
         kind, body = "ObjectMessage", "Serialized object body is not deserialized."
@@ -149,6 +158,23 @@ class JMSAdapter:
             while len(messages) < limit and enumeration.hasMoreElements():
                 messages.append(extract_message(enumeration.nextElement(), max_body_bytes))
             return messages
+        finally:
+            browser.close()
+
+    def full_message(self, queue_name, message_id):
+        """Re-read one preview without receiving or acknowledging the message."""
+        if not message_id:
+            raise ValueError("This message has no MessageId; its full content cannot be located.")
+        selector = "JMSMessageID = '" + message_id.replace("'", "''") + "'"
+        browser = self.session.createBrowser(self.session.createQueue(queue_name), selector)
+        try:
+            enumeration = browser.getEnumeration()
+            if not enumeration.hasMoreElements():
+                raise ValueError("Message is no longer on the queue; nothing was copied.")
+            message = extract_message(enumeration.nextElement(), None)
+            if message.message_id != message_id:
+                raise ValueError("The browser returned a different MessageId; nothing was copied.")
+            return message
         finally:
             browser.close()
 

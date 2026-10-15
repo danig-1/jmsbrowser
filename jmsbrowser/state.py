@@ -139,6 +139,20 @@ class Controller:
         state.busy = True
         self._submit(index, "browse")
 
+    def full_message(self, message):
+        """Return a future for an unbounded, non-consuming read of one message."""
+        state = self.current
+        if state.status != "connected" or state.selected_queue is None:
+            raise ValueError("Connect to the queue before copying its full message.")
+        epoch, client, queue_name = state.epoch, state.client, state.selected_queue.name
+
+        def run():
+            if state.epoch != epoch or self.closed:
+                raise ValueError("Connection changed before the full message could be read.")
+            return Message.from_dict(client.request("full_message", queue=queue_name, message_id=message.message_id))
+
+        return state.executor.submit(run)
+
     def select_message(self, index):
         self.current.message_index = max(0, min(index, len(self.current.messages) - 1))
         self.detail_scroll = 0

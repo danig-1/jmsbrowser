@@ -6,7 +6,8 @@ import locale
 import time
 
 from .body_view import body_layout
-from .screen import MIN_PANEL_WIDTHS, PALETTE, ViewOptions, filtered_indices, panel_widths, queue_indices, render
+from .clipboard import copy_text
+from .screen import MIN_PANEL_WIDTHS, PALETTE, ViewOptions, detail_identity, filtered_indices, panel_widths, queue_indices, render
 
 
 def navigation_key(key):
@@ -27,6 +28,62 @@ class TerminalApp:
         self.last_frame = None
         self.pending_high_surrogate = None
         self.drag_start = None
+        self.pending_copy = None
+
+    def copy_feedback(self, identity, text, error=False, pending=False):
+        view, now = self.view, time.monotonic()
+        view.copy_identity, view.copy_feedback, view.copy_error = identity, text, error
+        view.copy_until = float("inf") if pending else now + (5 if error else 1.5)
+        view.copy_flash_until = now + 0.3 if not error and not pending else 0
+
+    def finish_copy(self, identity, message):
+        try:
+            if message.copy_requires_fetch(self.controller.detail_tab):
+                raise ValueError("The full content could not be read; nothing was copied.")
+            copy_text(message.copy_text(self.controller.detail_tab))
+        except Exception as error:
+            self.copy_feedback(identity, "Copy failed: " + str(error), error=True)
+        else:
+            self.copy_feedback(identity, "Copied to clipboard")
+
+    def copy_detail(self, identity):
+        if identity != detail_identity(self.controller):
+            return
+        if self.pending_copy:
+            # Repeated clicks coalesce; a new selection cancels the old intent.
+            if self.pending_copy[0] == identity:
+                return
+            self.pending_copy[1].cancel()
+            self.pending_copy = None
+        message = self.controller.current.selected_message
+        if message.copy_requires_fetch(self.controller.detail_tab):
+            try:
+                future = self.controller.full_message(message)
+            except Exception as error:
+                self.copy_feedback(identity, "Copy failed: " + str(error), error=True)
+            else:
+                self.pending_copy = identity, future
+                self.copy_feedback(identity, "Reading full content to copy…", pending=True)
+        else:
+            self.finish_copy(identity, message)
+
+    def poll_copy(self):
+        if not self.pending_copy:
+            return
+        identity, future = self.pending_copy
+        if (identity != detail_identity(self.controller) or self.view.consumer_inspector
+                or self.view.composer is not None or self.view.prompt is not None or not self.running):
+            future.cancel()
+            self.pending_copy = None
+            self.view.copy_until = self.view.copy_flash_until = 0
+        elif future.done():
+            self.pending_copy = None
+            try:
+                message = future.result()
+            except Exception as error:
+                self.copy_feedback(identity, "Copy failed: " + str(error), error=True)
+            else:
+                self.finish_copy(identity, message)
 
     def visible(self):
         controller = self.controller
@@ -60,7 +117,8 @@ class TerminalApp:
         if self.controller.detail_tab == 0:
             detail = next((region for region in self.last_frame.regions if region[0] == "detail"), None) if self.last_frame else None
             columns = (detail[3] if detail else 70) - 8
-            count = len(body_layout(message.body, message.type, message.truncated, columns, self.view.body_wrap).rows)
+            count = len(body_layout(message.body, message.type, message.truncated, columns,
+                                    self.view.fullscreen or self.view.body_wrap).rows)
         else:
             count = len(message.metadata(self.controller.detail_tab))
         maximum = max(0, count - rows)
@@ -68,6 +126,8 @@ class TerminalApp:
         self.controller.detail_scroll = max(0, min(maximum, current + delta))
 
     def toggle_body(self, option):
+        if self.view.fullscreen:
+            return
         setattr(self.view, option, not getattr(self.view, option))
         if option == "body_wrap":
             self.controller.detail_scroll = 0
@@ -256,7 +316,7 @@ class TerminalApp:
             c.refresh_queue_depths() if c.pane == 1 else c.refresh()
         elif key == "h":
             self.select_detail_tab(c.detail_tab + 1)
-        elif key in ("w", "s") and c.pane == 2 and c.detail_tab == 0:
+        elif key in ("w", "s") and c.pane == 2 and c.detail_tab == 0 and not view.fullscreen:
             self.toggle_body("body_wrap" if key == "w" else "body_colors")
         elif key == "/":
             view.prompt = view.filters[c.pane]
@@ -269,7 +329,7 @@ class TerminalApp:
             rows = self.last_frame.detail_height if self.last_frame else 10
             self.scroll_detail(-rows if key == "PGUP" else rows)
         elif key in ("[", "]"):
-            if c.detail_tab != 0 or not view.body_wrap:
+            if c.detail_tab != 0 or not (view.fullscreen or view.body_wrap):
                 view.horizontal_scroll = max(0, view.horizontal_scroll + (-8 if key == "[" else 8))
 
     def handle_mouse(self, x, y, buttons):
@@ -319,6 +379,11 @@ class TerminalApp:
                 self.controller.pane = 2
                 self.select_detail_tab(value)
                 return
+            if action == "copy_detail":
+                self.controller.pane = 2
+                if buttons & (curses.BUTTON1_CLICKED | curses.BUTTON1_DOUBLE_CLICKED):
+                    self.copy_detail(value)
+                return
             if action in ("body_wrap", "body_colors"):
                 if buttons & (curses.BUTTON1_CLICKED | curses.BUTTON1_DOUBLE_CLICKED):
                     self.controller.pane = 2
@@ -362,6 +427,7 @@ class TerminalApp:
         next_refresh = time.monotonic() + self.controller.config.ui.refresh_seconds
         while self.running:
             self.controller.poll()
+            self.poll_copy()
             refresh = self.controller.config.ui.refresh_seconds
             if refresh and time.monotonic() >= next_refresh:
                 if self.controller.current.status == "connected" and not self.controller.current.busy and not self.view.consumer_inspector and self.view.composer is None:

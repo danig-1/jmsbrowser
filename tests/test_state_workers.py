@@ -5,10 +5,38 @@ import time
 
 import pytest
 
-from jmsbrowser.config import Config, ConnectionConfig
+from jmsbrowser.config import Config, ConnectionConfig, UIConfig
 from jmsbrowser.domain import Consumer, ConsumerSnapshot, Message, QueueInfo
 from jmsbrowser.state import Controller
 from jmsbrowser.ui import TerminalApp
+from jmsbrowser.screen import detail_identity
+
+
+def test_async_full_copy_reads_original_body_and_preserves_preview_and_depth(monkeypatch):
+    copied = []
+    monkeypatch.setattr("jmsbrowser.ui.copy_text", copied.append)
+    controller = Controller(Config((ConnectionConfig("Demo", "artemis"),), UIConfig(max_body_bytes=5)), demo=True)
+    app = TerminalApp(controller)
+    try:
+        wait_until(controller, lambda: controller.current.status == "connected")
+        controller.browse_queue()
+        wait_until(controller, lambda: controller.current.messages_loaded)
+        preview = controller.current.selected_message
+        depth = controller.current.selected_queue.depth
+        assert preview.truncated
+        app.select_detail_tab(0)
+        app.copy_detail(detail_identity(controller))
+        deadline = time.monotonic() + 3
+        while not copied and time.monotonic() < deadline:
+            controller.poll()
+            app.poll_copy()
+            time.sleep(0.005)
+        assert len(copied) == 1 and copied[0].startswith(preview.body)
+        assert len(copied[0].encode()) == preview.size > 5
+        assert controller.current.selected_message is preview
+        assert controller.current.selected_queue.depth == depth
+    finally:
+        controller.close()
 
 
 class FakeClient:

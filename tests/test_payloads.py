@@ -58,3 +58,17 @@ def test_source_worker_browses_when_parent_runs_outside_checkout(tmp_path, monke
         second = client.request("browse", queue="DEV.ORDERS", limit=100, max_body_bytes=262144)
         assert len(first) == 3
         assert first == second
+
+
+def test_worker_full_message_reads_past_preview_limit_without_consuming():
+    with WorkerClient(ConnectionConfig("Demo", "artemis"), demo=True) as client:
+        before = client.request("connect")
+        preview = client.request("browse", queue="DEV.ORDERS", limit=100, max_body_bytes=5)
+        assert preview[0]["truncated"]
+        full = client.request("full_message", queue="DEV.ORDERS", message_id=preview[0]["message_id"])
+        assert not full["truncated"] and full["body"].startswith(preview[0]["body"])
+        assert len(full["body"].encode()) == full["size"] > 5
+        assert before == client.request("queues")
+        with pytest.raises(BrokerError, match="no longer"):
+            client.request("full_message", queue="DEV.ORDERS", message_id="ID:gone")
+        assert before == client.request("queues")

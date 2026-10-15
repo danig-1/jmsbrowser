@@ -1,5 +1,6 @@
 import curses
 from dataclasses import replace
+from concurrent.futures import Future
 
 import pytest
 from wcwidth import wcswidth
@@ -10,6 +11,159 @@ from jmsbrowser.domain import Consumer, ConsumerSnapshot, Message, QueueInfo
 from jmsbrowser.screen import HEADERS, ViewOptions, render, short_id
 from jmsbrowser.state import Controller
 from jmsbrowser.ui import TerminalApp
+
+
+@pytest.mark.parametrize("fullscreen", [False, True])
+@pytest.mark.parametrize("tab", [0, 1, 2])
+def test_data_click_copies_full_section_past_visible_rows_and_columns(controller, monkeypatch, fullscreen, tab):
+    body = '{"text":"é界🙂", "long":"' + "abcdef" * 200 + '"}\n' + "offscreen\n" * 80
+    message = Message("ID:copy", "TextMessage", 4, body, len(body.encode()),
+                      {"JMSTimestamp": 1700000000123, **{f"header{i}": "long " * 100 for i in range(40)}},
+                      {f"prop{i}": "é界🙂 " * 100 for i in range(40)})
+    controller.current.messages = [message]
+    app = TerminalApp(controller)
+    app.view.fullscreen, app.view.body_wrap = fullscreen, False
+    controller.detail_tab, controller.detail_scroll, app.view.horizontal_scroll = tab, 10, 12
+    copied = []
+    monkeypatch.setattr("jmsbrowser.ui.copy_text", copied.append)
+    frame = app.last_frame = render(controller, 144, 42, app.view)
+    _, _, x, y, _ = next(action for action in frame.actions if action[0] == "copy_detail")
+    app.handle_mouse(x + 1, y, curses.BUTTON1_PRESSED)
+    assert not copied
+    app.handle_mouse(x + 1, y, curses.BUTTON1_CLICKED)
+    assert copied == [message.body if tab == 0 else message.detail(tab)]
+    assert controller.detail_scroll == 10 and app.view.horizontal_scroll == 12
+    flash = render(controller, 144, 42, app.view)
+    assert flash.cells[y][x][1:] == ("bg", "accent")
+    assert "Copied to clipboard" in "\n".join(flash.plain_lines())
+    assert app.view.fullscreen == fullscreen
+
+
+@pytest.mark.parametrize("fullscreen", [False, True])
+def test_tab_clicks_keyboard_navigation_controls_and_headings_never_copy(controller, monkeypatch, fullscreen):
+    copied = []
+    monkeypatch.setattr("jmsbrowser.ui.copy_text", copied.append)
+    app = TerminalApp(controller)
+    app.view.fullscreen = fullscreen
+    for tab in (2, 0, 1):
+        frame = app.last_frame = render(controller, 144, 42, app.view)
+        action = next(hit for hit in frame.actions if hit[:2] == ("detail_tab", tab))
+        app.handle_mouse(action[2], action[3], curses.BUTTON1_CLICKED)
+        assert controller.detail_tab == tab
+    frame = app.last_frame = render(controller, 144, 42, app.view)
+    data = next(action for action in frame.actions if action[0] == "copy_detail")
+    app.handle_mouse(data[2], data[3] - 2, curses.BUTTON1_CLICKED)  # Key / Value headings
+    app.handle_mouse(data[2], data[3], getattr(curses, "BUTTON4_PRESSED", 0))
+    app.handle_key("TAB")
+    app.select_detail_tab(0)
+    frame = app.last_frame = render(controller, 144, 42, app.view)
+    for action in frame.actions:
+        if action[0] in ("body_wrap", "body_colors"):
+            app.handle_mouse(action[2], action[3], curses.BUTTON1_CLICKED)
+    assert not copied and not app.view.copy_feedback
+
+
+def test_copy_flash_expires_and_does_not_follow_tab_or_message_selection(controller, monkeypatch):
+    clock = [100.0]
+    monkeypatch.setattr("jmsbrowser.ui.time.monotonic", lambda: clock[0])
+    monkeypatch.setattr("jmsbrowser.ui.copy_text", lambda _: None)
+    app = TerminalApp(controller)
+    frame = app.last_frame = render(controller, 144, 42, app.view)
+    _, identity, x, y, _ = next(a for a in frame.actions if a[0] == "copy_detail")
+    app.handle_mouse(x, y, curses.BUTTON1_DOUBLE_CLICKED)
+    assert not app.view.fullscreen
+    assert render(controller, 144, 42, app.view).cells[y][x][2] == "accent"
+    clock[0] += 0.31
+    assert render(controller, 144, 42, app.view).cells[y][x][2] == "bg"
+    assert "Copied to clipboard" in "\n".join(render(controller, 144, 42, app.view).plain_lines())
+    controller.select_message(1)
+    assert "Copied to clipboard" not in "\n".join(render(controller, 144, 42, app.view).plain_lines())
+    controller.select_message(0)
+    app.select_detail_tab(2)
+    assert "Copied to clipboard" not in "\n".join(render(controller, 144, 42, app.view).plain_lines())
+    app.select_detail_tab(1)
+    clock[0] = 102
+    assert "Copied to clipboard" not in "\n".join(render(controller, 144, 42, app.view).plain_lines())
+
+
+def test_clipboard_error_is_visible_without_a_success_flash(controller, monkeypatch):
+    def fail(_):
+        raise RuntimeError("Clipboard is busy; try again.")
+    monkeypatch.setattr("jmsbrowser.ui.copy_text", fail)
+    app = TerminalApp(controller)
+    frame = app.last_frame = render(controller, 144, 42, app.view)
+    _, _, x, y, _ = next(a for a in frame.actions if a[0] == "copy_detail")
+    app.handle_mouse(x, y, curses.BUTTON1_CLICKED)
+    frame = render(controller, 144, 42, app.view)
+    assert "Copy failed: Clipboard is busy" in "\n".join(frame.plain_lines())
+    assert frame.cells[y][x][2] == "bg"
+
+
+@pytest.mark.parametrize("outcome", ["success", "error", "message", "tab", "queue", "disconnect", "modal"])
+def test_truncated_body_copy_waits_for_full_read_and_discards_stale_results(controller, monkeypatch, outcome):
+    message = replace(controller.current.messages[0], body="preview", truncated=True)
+    controller.current.messages = [message, replace(message, message_id="ID:other")]
+    app = TerminalApp(controller)
+    app.select_detail_tab(0)
+    future, requests, copied = Future(), [], []
+    def fetch(item):
+        requests.append(item)
+        future.set_running_or_notify_cancel()
+        return future
+    monkeypatch.setattr(controller, "full_message", fetch)
+    monkeypatch.setattr("jmsbrowser.ui.copy_text", copied.append)
+    frame = app.last_frame = render(controller, 144, 42, app.view)
+    _, _, x, y, _ = next(a for a in frame.actions if a[0] == "copy_detail")
+    app.handle_mouse(x, y, curses.BUTTON1_CLICKED)
+    app.handle_mouse(x, y, curses.BUTTON1_CLICKED)
+    app.poll_copy()
+    assert requests == [message] and not copied
+    assert "Reading full content" in "\n".join(render(controller, 144, 42, app.view).plain_lines())
+    if outcome == "message":
+        controller.select_message(1)
+    elif outcome == "tab":
+        app.select_detail_tab(1)
+    elif outcome == "queue":
+        controller.select_queue(0)
+    elif outcome == "disconnect":
+        controller.disconnect()
+    elif outcome == "modal":
+        app.view.consumer_inspector = True
+    if outcome == "error":
+        future.set_exception(ValueError("Message is no longer on the queue"))
+    else:
+        future.set_result(replace(message, body="full é界🙂\n" * 50000, truncated=False))
+    app.poll_copy()
+    assert app.pending_copy is None
+    if outcome == "success":
+        assert copied == ["full é界🙂\n" * 50000]
+    elif outcome == "error":
+        assert not copied and app.view.copy_error and "no longer" in app.view.copy_feedback
+    else:
+        assert not copied and app.view.copy_flash_until == 0
+
+
+@pytest.mark.parametrize("tab", [1, 2])
+def test_copy_fetches_complete_metadata_when_a_binary_value_was_previewed(controller, monkeypatch, tab):
+    values = {"binary": {"type": "bytes", "size": 5000, "hex": "ab" * 4096, "truncated": True}}
+    field = "headers" if tab == 1 else "properties"
+    preview = replace(controller.current.messages[0], **{field: values})
+    full_values = {"binary": {"type": "bytes", "size": 5000, "hex": "ab" * 5000, "truncated": False}}
+    full = replace(preview, **{field: full_values})
+    controller.current.messages = [preview]
+    app = TerminalApp(controller)
+    app.select_detail_tab(tab)
+    future = Future()
+    monkeypatch.setattr(controller, "full_message", lambda _: future)
+    copied = []
+    monkeypatch.setattr("jmsbrowser.ui.copy_text", copied.append)
+    frame = app.last_frame = render(controller, 144, 42, app.view)
+    _, _, x, y, _ = next(a for a in frame.actions if a[0] == "copy_detail")
+    app.handle_mouse(x, y, curses.BUTTON1_CLICKED)
+    assert not copied
+    future.set_result(full)
+    app.poll_copy()
+    assert copied == [full.detail(tab)] and "ab" * 5000 in copied[0]
 
 
 @pytest.fixture
@@ -559,9 +713,16 @@ def test_body_wrap_scroll_controls_and_colors_in_both_views(controller, fullscre
     app.handle_key("]")
     assert app.view.horizontal_scroll == 0
     app.handle_key("s")
-    assert not app.view.body_colors
     assert controller.current.message_index == original_selection
     frame = app.last_frame = render(controller, 120, 28, app.view)
+    if fullscreen:
+        app.handle_key("w")
+        assert app.view.body_colors and app.view.body_wrap
+        assert not any(action[0] in ("body_wrap", "body_colors") for action in frame.actions)
+        assert "w wrap" not in frame.plain_lines()[-1] and "s color" not in frame.plain_lines()[-1]
+        assert message.body == payload
+        return
+    assert not app.view.body_colors
     _, _, x, y, _ = next(action for action in frame.actions if action[0] == "body_wrap")
     # A press then a click toggles once, not twice.
     app.handle_mouse(x, y, curses.BUTTON1_PRESSED)
@@ -573,6 +734,30 @@ def test_body_wrap_scroll_controls_and_colors_in_both_views(controller, fullscre
     app.handle_key("w")
     assert app.view.body_wrap and app.view.horizontal_scroll == 0
     assert message.body == payload
+
+
+def test_expanded_body_always_wraps_and_colors_even_if_inline_settings_are_off(controller):
+    controller.current.messages = [Message("ID:colors", "TextMessage", 4,
+                                         '{"key":"' + "Long text " * 300 + '"}', 3010)]
+    controller.detail_tab = 0
+    app = TerminalApp(controller)
+    app.view.body_wrap = app.view.body_colors = False
+    app.view.horizontal_scroll = 32
+    app.handle_key("ENTER")
+    frame = app.last_frame = render(controller, 120, 28, app.view)
+    assert frame.detail_total_rows > frame.detail_height
+    assert any(fg == "green" for row in frame.cells for _, fg, _ in row)
+    assert not any(action[0] in ("body_wrap", "body_colors") for action in frame.actions)
+    assert "Wrap:" not in "\n".join(frame.plain_lines()) and "Color:" not in "\n".join(frame.plain_lines())
+    for key in ("w", "s", "]"):
+        app.handle_key(key)
+    assert not app.view.body_wrap and not app.view.body_colors
+    assert app.view.horizontal_scroll == 32
+    assert render(controller, 120, 28, app.view).plain_lines() == frame.plain_lines()
+    app.scroll_detail(10**9)
+    assert controller.detail_scroll == frame.detail_total_rows - frame.detail_height
+    app.handle_key("ESC")
+    assert not app.view.fullscreen and not app.view.body_wrap and not app.view.body_colors
 
 
 def test_body_colors_are_optional_and_controls_are_absent_on_metadata_tabs(controller):
