@@ -18,7 +18,7 @@ def base():
 def test_example_loads_without_credentials():
     config = load_config(Path(__file__).resolve().parents[1] / "config.example.yaml")
     assert config.ui.theme == "reader"
-    assert [connection.type for connection in config.connections] == ["artemis", "ibm"]
+    assert [connection.type for connection in config.connections] == ["artemis", "ibm", "artemis"]
 
 
 @pytest.mark.parametrize("changes", [{"port": True}, {"port": 65536}, {"auto_connect": "false"}, {"password": "secret"}, {"type": "rabbitmq"}, {"timeout_seconds": 0}])

@@ -1,5 +1,5 @@
 # Copy to config.yaml or pass --config config.example.yaml.
-# These names, ports, queues and credentials match compose.yaml.
+# The first two connections match compose.yaml; the third is a TLS-only example.
 connections:
   - name: Local Artemis
     type: artemis
@@ -24,6 +24,27 @@ connections:
     reply_prefix: DEV.JMSBROWSER.*
     queue_pattern: DEV.*
     auto_connect: false
+
+  # External TLS example only; no corresponding broker is created by Compose.
+  - name: Artemis TLS (JKS)
+    type: artemis
+    host: artemis-tls.example.com
+    port: 61617
+    username: artemis
+    password_env: ARTEMIS_TLS_PASSWORD
+    management_url: https://artemis-tls.example.com:8162/console/jolokia
+    # Management HTTPS uses system CAs; for a private CA, supply a PEM CA file:
+    # management_ca_file: C:/certs/artemis-ca.pem
+    queue_pattern: DEV.*
+    auto_connect: false
+    tls:
+      enabled: true
+      # Replace with the absolute path to your existing JKS truststore.
+      trust_store: C:/certs/artemis-truststore.jks
+      # Example JKS password: changeit
+      # PowerShell: $env:ARTEMIS_JKS_PASSWORD = 'changeit'
+      # Bash: export ARTEMIS_JKS_PASSWORD='changeit'
+      trust_store_password_env: ARTEMIS_JKS_PASSWORD
 
 ui:
   theme: reader
