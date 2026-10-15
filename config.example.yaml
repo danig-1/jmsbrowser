@@ -1,15 +1,16 @@
 # Copy to config.yaml or pass --config config.example.yaml.
 # The first two connections match compose.yaml; the third is a TLS-only example.
+# Passwords are literal YAML values. Quote passwords to preserve leading zeros.
 connections:
   - name: Local Artemis
     type: artemis
     host: localhost
     port: 61616
     username: artemis
-    password_env: ARTEMIS_PASSWORD
+    password: "artemis-local-123"
     # Compose publishes IPv4 loopback; avoid a slow ::1-to-IPv4 fallback on Windows.
     management_url: http://127.0.0.1:8161/console/jolokia
-    queue_pattern: DEV.*
+    queue_pattern: "*"
     auto_connect: false
 
   - name: Local IBM MQ
@@ -19,10 +20,10 @@ connections:
     queue_manager: QM1
     channel: DEV.APP.SVRCONN
     username: app
-    password_env: MQ_APP_PASSWORD
+    password: "app-local-123"
     model_queue: DEV.APP.MODEL.QUEUE
     reply_prefix: DEV.JMSBROWSER.*
-    queue_pattern: DEV.*
+    queue_pattern: "*"
     auto_connect: false
 
   # External TLS example only; no corresponding broker is created by Compose.
@@ -31,20 +32,17 @@ connections:
     host: artemis-tls.example.com
     port: 61617
     username: artemis
-    password_env: ARTEMIS_TLS_PASSWORD
+    password: "12345678"  # Example literal broker password; replace for your server.
     management_url: https://artemis-tls.example.com:8162/console/jolokia
     # Management HTTPS uses system CAs; for a private CA, supply a PEM CA file:
     # management_ca_file: C:/certs/artemis-ca.pem
-    queue_pattern: DEV.*
+    queue_pattern: "*"
     auto_connect: false
     tls:
       enabled: true
       # Replace with the absolute path to your existing JKS truststore.
       trust_store: C:/certs/artemis-truststore.jks
-      # Example JKS password: changeit
-      # PowerShell: $env:ARTEMIS_JKS_PASSWORD = 'changeit'
-      # Bash: export ARTEMIS_JKS_PASSWORD='changeit'
-      trust_store_password_env: ARTEMIS_JKS_PASSWORD
+      trust_store_password: "changeit"  # Replace with your JKS password.
 
 ui:
   theme: reader

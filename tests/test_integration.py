@@ -16,9 +16,7 @@ pytestmark = [pytest.mark.integration, pytest.mark.skipif(os.environ.get("JMSBRO
 
 
 @pytest.mark.parametrize("index", [0, 1], ids=["artemis", "ibm"])
-def test_actual_application_browses_every_fixture_without_consuming(index, monkeypatch):
-    monkeypatch.setenv("ARTEMIS_PASSWORD", "artemis-local-123")
-    monkeypatch.setenv("MQ_APP_PASSWORD", "app-local-123")
+def test_actual_application_browses_every_fixture_without_consuming(index):
     connection = replace(load_config(ROOT / "config.example.yaml").connections[index], timeout_seconds=30)
     expected = {"DEV.EMPTY": 0, "DEV.NOTIFICATIONS": 1, "DEV.ORDERS": 3, "DEV.PAYMENTS": 2}
     with WorkerClient(connection) as client:
@@ -51,8 +49,7 @@ def test_offline_worker_does_not_require_java_or_credentials(monkeypatch):
         assert len(client.request("browse", queue="DEV.ORDERS", limit=100, max_body_bytes=262144)) == 3
 
 
-def test_artemis_loadtest_has_1000_persistent_messages_without_consuming(monkeypatch):
-    monkeypatch.setenv("ARTEMIS_PASSWORD", "artemis-local-123")
+def test_artemis_loadtest_has_1000_persistent_messages_without_consuming():
     config = load_config(ROOT / "config.example.yaml")
     connection = replace(config.connections[0], timeout_seconds=30)
     body = json.loads((ROOT / "dev/loadtest-message.json").read_text())
@@ -71,9 +68,7 @@ def test_artemis_loadtest_has_1000_persistent_messages_without_consuming(monkeyp
 
 
 @pytest.mark.parametrize("index", [0, 1], ids=["artemis", "ibm"])
-def test_consumer_inquiry_detects_input_only_and_does_not_consume(index, monkeypatch):
-    monkeypatch.setenv("ARTEMIS_PASSWORD", "artemis-local-123")
-    monkeypatch.setenv("MQ_APP_PASSWORD", "app-local-123")
+def test_consumer_inquiry_detects_input_only_and_does_not_consume(index):
     connection = replace(load_config(ROOT / "config.example.yaml").connections[index], timeout_seconds=30)
     with WorkerClient(connection) as client:
         before = client.request("connect")

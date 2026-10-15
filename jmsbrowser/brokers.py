@@ -130,7 +130,7 @@ class JMSAdapter:
             if cfg.tls.get("enabled"):
                 self.factory.setSSLCipherSuite(cfg.tls["cipher_suite"])
         try:
-            self.connection = self.factory.createConnection(cfg.username, cfg.password())
+            self.connection = self.factory.createConnection(cfg.username, cfg.get_password())
             if hasattr(self, "on_error"):
                 self.exception_listener = jpype.JProxy("javax.jms.ExceptionListener", dict(onException=self.on_error))
                 self.connection.setExceptionListener(self.exception_listener)
@@ -200,7 +200,7 @@ class ArtemisAdapter(JMSAdapter):
         parsed = urlsplit(cfg.management_url)
         if parsed.scheme not in ("http", "https") or parsed.username or parsed.password:
             raise ValueError("management_url must be an HTTP(S) URL without credentials.")
-        credentials = f"{cfg.management_username or cfg.username}:{cfg.password(management=True)}"
+        credentials = f"{cfg.management_username or cfg.username}:{cfg.get_password(management=True)}"
         headers = {"Content-Type": "application/json", "Authorization": "Basic " + base64.b64encode(credentials.encode()).decode()}
         request = urllib.request.Request(cfg.management_url.rstrip("/"), json.dumps(payload).encode(), headers, method="POST")
         options = {"timeout": cfg.timeout_seconds}
@@ -292,7 +292,7 @@ class IBMAdapter(JMSAdapter):
         J = jpype.JClass
         C = J("com.ibm.mq.constants.CMQC")
         properties = J("java.util.Hashtable")()
-        for key, value in ((C.HOST_NAME_PROPERTY, self.config.host), (C.CHANNEL_PROPERTY, self.config.channel), (C.USER_ID_PROPERTY, self.config.username), (C.PASSWORD_PROPERTY, self.config.password())):
+        for key, value in ((C.HOST_NAME_PROPERTY, self.config.host), (C.CHANNEL_PROPERTY, self.config.channel), (C.USER_ID_PROPERTY, self.config.username), (C.PASSWORD_PROPERTY, self.config.get_password())):
             properties.put(key, value)
         properties.put(C.PORT_PROPERTY, J("java.lang.Integer")(self.config.port))
         properties.put(C.TRANSPORT_PROPERTY, C.TRANSPORT_MQSERIES_CLIENT)
@@ -337,6 +337,12 @@ class IBMAdapter(JMSAdapter):
         request.addParameter(F.MQIACF_Q_ATTRS, jpype.JArray(jpype.JInt)([C.MQCA_Q_NAME, C.MQIA_CURRENT_Q_DEPTH]))
         queues = []
         for response in agent.send(request):
+            # Wildcard inquiries can mix queue data with per-object permission errors.
+            reason = int(response.getReason())
+            if reason == C.MQRC_NOT_AUTHORIZED:
+                continue
+            if int(response.getCompCode()) == C.MQCC_FAILED:
+                raise RuntimeError(f"IBM queue discovery failed (reason {reason}).")
             name = str(response.getStringParameterValue(C.MQCA_Q_NAME)).strip()
             if name != reply_name and not fnmatch.fnmatchcase(name, self.config.reply_prefix) and fnmatch.fnmatchcase(name, self.config.queue_pattern):
                 queues.append(QueueInfo(name, int(response.getIntParameterValue(C.MQIA_CURRENT_Q_DEPTH)), "LOCAL"))

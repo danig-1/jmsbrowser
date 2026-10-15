@@ -24,9 +24,7 @@ def command(args, text=None):
 
 
 @pytest.fixture(params=[0, 1], ids=["artemis", "ibm"])
-def destination_queue(request, monkeypatch):
-    monkeypatch.setenv("ARTEMIS_PASSWORD", "artemis-local-123")
-    monkeypatch.setenv("MQ_APP_PASSWORD", "app-local-123")
+def destination_queue(request):
     index = request.param
     name = "DEV.COMPOSER.TEST." + uuid.uuid4().hex[:12].upper()
     assert re.fullmatch(r"DEV\.COMPOSER\.TEST\.[A-F0-9]{12}", name)

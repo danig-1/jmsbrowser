@@ -1,5 +1,4 @@
 """Integration helper: hold input/browse handles on DEV.EMPTY, without receiving."""
-import os
 import sys
 
 from jmsbrowser.brokers import create_adapter
@@ -7,14 +6,12 @@ from jmsbrowser.config import load_config
 
 
 def main():
-    os.environ["ARTEMIS_PASSWORD"] = "artemis-local-123"
-    os.environ["MQ_APP_PASSWORD"] = "app-local-123"
     adapter = create_adapter(load_config("config.example.yaml").connections[int(sys.argv[1])])
     resources = []
     try:
         adapter.connect()
         if adapter.config.type == "artemis":
-            connection = adapter.factory.createConnection(adapter.config.username, adapter.config.password())
+            connection = adapter.factory.createConnection(adapter.config.username, adapter.config.get_password())
             resources.append(connection)
             connection.setClientID("jmsbrowser-integration-consumer")
             session = connection.createSession(False, 1)

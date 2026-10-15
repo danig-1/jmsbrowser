@@ -7,6 +7,8 @@ import os
 from pathlib import Path
 import urllib.request
 
+from .config import literal_password
+
 
 def client_dir():
     return Path(os.environ.get("JMSBROWSER_CLIENT_DIR", Path.home() / ".cache/jmsbrowser/clients"))
@@ -65,11 +67,9 @@ def start_jvm(provider, tls):
     for key, prop in (("trust_store", "trustStore"), ("key_store", "keyStore")):
         if tls.get(key):
             arguments.append(f"-Djavax.net.ssl.{prop}={tls[key]}")
-        env_key = tls.get(key + "_password_env")
-        if env_key:
-            if env_key not in os.environ:
-                raise ValueError(f"Environment variable {env_key} is not set.")
-            arguments.append(f"-Djavax.net.ssl.{prop}Password={os.environ[env_key]}")
+        if key + "_password" in tls:
+            password = literal_password(tls[key + "_password"], f"tls.{key}_password")
+            arguments.append(f"-Djavax.net.ssl.{prop}Password={password}")
     jpype.startJVM(jpype.getDefaultJVMPath(), *arguments, classpath=classpath(provider), convertStrings=True)
     # Keep Java diagnostics out of the JSON worker protocol and the curses UI.
     system = jpype.JClass("java.lang.System")

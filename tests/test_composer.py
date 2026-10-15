@@ -46,7 +46,7 @@ def test_invalid_message_settings(changes):
 
 
 def test_draft_files_roundtrip_unicode_and_typed_values_without_credentials(tmp_path):
-    config = ConnectionConfig("IBM", "ibm", queue_manager="QM1", channel="DEV.APP.SVRCONN", password_env="SECRET")
+    config = ConnectionConfig("IBM", "ibm", queue_manager="QM1", channel="DEV.APP.SVRCONN", password="SECRET")
     target = destination(config, "DEV.ORDERS")
     draft = OutgoingMessage("hello é🙂\nsecond line", 8, False, 60000, "event.test", "request-123", [OutgoingProperty("x", "Long", "123")])
     path = tmp_path / "draft.json"

@@ -1,7 +1,6 @@
 from __future__ import annotations
 
 from dataclasses import asdict, dataclass, field
-import os
 from pathlib import Path
 
 import yaml
@@ -29,6 +28,20 @@ def string(value, label, required=False):
     return value
 
 
+def literal_password(value, label):
+    # YAML loads an unquoted all-digit password as an integer.
+    if type(value) is int:
+        return str(value)
+    return string(value, label)
+
+
+def reject_password_env(settings, label):
+    for key in settings:
+        if key in ("password_env", "management_password_env", "trust_store_password_env", "key_store_password_env"):
+            raise ConfigError(f"{label}.{key} is no longer supported. "
+                              f"Use {key[:-4]} with the password directly in YAML.")
+
+
 @dataclass(frozen=True)
 class ConnectionConfig:
     name: str
@@ -36,7 +49,7 @@ class ConnectionConfig:
     host: str = "localhost"
     port: int = 61616
     username: str = ""
-    password_env: str = ""
+    password: str | None = field(default=None, repr=False)
     queue_manager: str = ""
     channel: str = ""
     queue_pattern: str = "*"
@@ -45,19 +58,16 @@ class ConnectionConfig:
     reply_prefix: str = "JMSBROWSER.*"
     management_url: str = ""
     management_username: str = ""
-    management_password_env: str = ""
+    management_password: str | None = field(default=None, repr=False)
     management_ca_file: str = ""
     auto_connect: bool = False
     timeout_seconds: int = 15
-    tls: dict = field(default_factory=dict)
+    tls: dict = field(default_factory=dict, repr=False)
 
-    def password(self, management=False):
-        key = self.management_password_env if management and self.management_password_env else self.password_env
-        if not key:
-            return ""
-        if key not in os.environ:
-            raise ConfigError(f"{self.name}: environment variable {key} is not set.")
-        return os.environ[key]
+    def get_password(self, management=False):
+        key = "management_password" if management and self.management_password is not None else "password"
+        value = getattr(self, key)
+        return literal_password(value, f"{self.name}.{key}") if value is not None else ""
 
     def to_dict(self):
         return asdict(self)
@@ -92,6 +102,8 @@ def load_config(path: str | Path) -> Config:
     connections, names = [], set()
     fields = ConnectionConfig.__dataclass_fields__
     for entry in raw_connections:
+        if isinstance(entry, dict):
+            reject_password_env(entry, "connection")
         if not isinstance(entry, dict) or set(entry) - fields.keys():
             raise ConfigError(f"Unknown connection settings: {set(entry) - fields.keys() if isinstance(entry, dict) else entry}")
         options = dict(entry)
@@ -106,6 +118,9 @@ def load_config(path: str | Path) -> Config:
         integer(options["port"], f"{name}.port", 1, 65535)
         integer(options.get("timeout_seconds", 15), f"{name}.timeout_seconds", 1, 120)
         boolean(options.get("auto_connect", False), f"{name}.auto_connect")
+        for key in ("password", "management_password"):
+            if key in options:
+                options[key] = literal_password(options[key], f"{name}.{key}")
         for key in fields:
             if key in options and key not in ("port", "timeout_seconds", "auto_connect", "queues", "tls"):
                 string(options[key], f"{name}.{key}")
@@ -114,13 +129,23 @@ def load_config(path: str | Path) -> Config:
             raise ConfigError(f"{name}.queues must be a list of queue names.")
         options["queues"] = tuple(queues)
         tls = options.get("tls", {})
-        tls_fields = {"enabled", "trust_store", "trust_store_password_env", "key_store", "key_store_password_env", "cipher_suite"}
+        tls_fields = {"enabled", "trust_store", "trust_store_password",
+                      "key_store", "key_store_password", "cipher_suite"}
+        if isinstance(tls, dict):
+            reject_password_env(tls, f"{name}.tls")
         if not isinstance(tls, dict) or set(tls) - tls_fields:
             raise ConfigError(f"{name}.tls contains unknown settings.")
         boolean(tls.get("enabled", False), f"{name}.tls.enabled")
+        tls = dict(tls)
+        for key in ("trust_store_password", "key_store_password"):
+            if key in tls:
+                tls[key] = literal_password(tls[key], f"{name}.tls.{key}")
         for key, value in tls.items():
+            if key in ("trust_store_password", "key_store_password"):
+                continue
             if key != "enabled":
                 string(value, f"{name}.tls.{key}", True)
+        options["tls"] = tls
         if kind == "ibm" and (not options.get("queue_manager") or not options.get("channel")):
             raise ConfigError(f"{name}: IBM requires queue_manager and channel.")
         if kind == "ibm" and tls.get("enabled") and not tls.get("cipher_suite"):

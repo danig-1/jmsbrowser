@@ -65,21 +65,19 @@ With an activated virtual environment (Windows, Linux or macOS):
 python run.py
 ```
 
-`run.py` loads the local Compose configuration and development credentials,
-preserves credentials already set in the environment, and starts only the browser.
+`run.py` loads `config.example.yaml`, including its development passwords,
+and starts only the browser.
 It does not start or stop containers. Additional browser options work as usual,
 for example `python run.py --connection "Local IBM MQ" --queue DEV.ORDERS`.
 
-For another configuration, set its credentials and invoke the module directly:
+For another configuration, put its passwords in YAML and invoke the module directly:
 
 ```powershell
-$env:ARTEMIS_PASSWORD = 'artemis-local-123'
-$env:MQ_APP_PASSWORD = 'app-local-123'
-.\.venv\Scripts\python.exe -m jmsbrowser --config config.example.yaml
+.\.venv\Scripts\python.exe -m jmsbrowser --config config.yaml
 ```
 
-On Linux/macOS, export the same two environment variables, then use
-`python -m jmsbrowser --config config.example.yaml`. Select a server and press Enter to
+On Linux/macOS, use `python -m jmsbrowser --config config.yaml`.
+Select a server and press Enter to
 connect. Tab or a mouse click moves between the three panels. In expanded message
 detail, Tab / Shift+Tab cycles Headers, Properties and Body; these tabs are also
 clickable in both detail layouts. Headers is selected by default. The message
@@ -215,9 +213,34 @@ target queue; the local Compose accounts already have it.
 ## Configuration and message columns
 
 Copy `config.example.yaml` to `config.yaml` or pass `--config`. Configuration is
-validated with `--check-config`; passwords are resolved from environment variables
-when connecting, and are never saved to YAML. Connection types are `artemis` and
+validated with `--check-config`. Passwords are stored directly in YAML.
+Connection types are `artemis` and
 `ibm`; default startup is disconnected (`auto_connect: false`).
+
+Use `password` for the broker password, and `management_password` for a
+separate Jolokia password. TLS stores use `trust_store_password` and
+`key_store_password` inside `tls`:
+
+```yaml
+password: "12345678"
+tls:
+  enabled: true
+  trust_store: C:/certs/artemis-truststore.jks
+  trust_store_password: "12345678"
+```
+
+The old `_env` password fields are no longer supported; remove the `_env` suffix
+and replace the variable name with the password itself. Numeric passwords are
+accepted with or without quotes; quoting preserves leading zeros.
+Jolokia uses the broker password when no separate management password is set.
+
+`queue_pattern` defaults to `"*"`, showing all discovered queues permitted by the
+broker account, including names outside `DEV.`. IBM omits queues whose metadata
+inquiry is denied and internal PCF reply queues. All example connections use
+this default. To narrow the list,
+use `DEV.*` for names starting with `DEV.` or `DEV.ORDERS` for that name.
+It does not create queues or filter message
+bodies/properties. If `queues` is also configured, names must match both settings.
 
 - **MessageId:** JMS ID, shortened in the table with the ending retained; available
   in full in the detail view and Headers tab.
@@ -260,8 +283,8 @@ these permissions. Artemis uses the queue's `listConsumersAsJSON` and optionally
 the broker's `listConsumers` management operation to supply connection details;
 denied optional enrichment leaves the consumer list visible with a notice.
 
-Optional TLS settings: `enabled`, `trust_store`, `trust_store_password_env`,
-`key_store`, `key_store_password_env`, and IBM `cipher_suite`. Store paths should
+Optional TLS settings: `enabled`, `trust_store`, `trust_store_password`,
+`key_store`, `key_store_password`, and IBM `cipher_suite`. Store paths should
 be absolute. Use Java trust/key stores; management HTTPS uses the system CAs or
 `management_ca_file`. `timeout_seconds` defaults to 15 per request.
 
@@ -388,8 +411,8 @@ development fixtures; composer sends are additional user messages.
 
 Published ports bind to loopback. IBM's development console uses a self-signed
 certificate. The checked-in secret files contain deliberately public development
-passwords, supplied to IBM through Compose secrets. Keep real credentials outside
-the YAML; the browser config references environment variables.
+passwords, supplied to IBM through Compose secrets. The browser's matching
+passwords are stored directly in `config.example.yaml`.
 
 Data and seed markers live in named volumes in the selected engine. Ordinary
 `docker compose down` or `podman compose --file compose.podman.yaml down` preserves
