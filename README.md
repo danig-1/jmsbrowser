@@ -41,6 +41,10 @@ own configuration. Run the commands below from the project directory. If you
 use your own Java 21+ installation, you can omit the `jdk4py` line from the
 requirements.
 
+The Java client JARs are downloaded separately by `--install-clients`; they are
+not installed by `requirements.txt` or included in a Git clone. If a proxy blocks
+the download, use [offline JMS client installation](#offline-jms-client-installation).
+
 Start the broker containers separately from the project directory:
 
 ```sh
@@ -303,6 +307,52 @@ python -m jmsbrowser --config config.example.yaml --queue DEV.ORDERS --screensho
 
 PNG export requires Pillow (`python -m pip install -r tools/requirements-mockups.txt`) and renders the same grid as
 curses from an actual browse result. It closes the connection after exporting.
+
+## Offline JMS client installation
+
+The error `JMS clients missing or damaged` means a required JAR is absent or does
+not match its SHA-256 checksum in `jmsbrowser/client-lock.json`. If
+`--install-clients` fails because of a proxy or unavailable internet access,
+download these exact eight files on a machine that can reach the links and
+transfer them to the target machine:
+
+| Provider | Download |
+| --- | --- |
+| Artemis | [artemis-jms-client-all-2.57.0.jar](https://repo.maven.apache.org/maven2/org/apache/artemis/artemis-jms-client-all/2.57.0/artemis-jms-client-all-2.57.0.jar) |
+| Artemis | [slf4j-simple-2.0.17.jar](https://repo.maven.apache.org/maven2/org/slf4j/slf4j-simple/2.0.17/slf4j-simple-2.0.17.jar) |
+| IBM MQ | [com.ibm.mq.allclient-9.4.5.0.jar](https://repo.maven.apache.org/maven2/com/ibm/mq/com.ibm.mq.allclient/9.4.5.0/com.ibm.mq.allclient-9.4.5.0.jar) |
+| IBM MQ | [javax.jms-api-2.0.1.jar](https://repo.maven.apache.org/maven2/javax/jms/javax.jms-api/2.0.1/javax.jms-api-2.0.1.jar) |
+| IBM MQ | [json-20251224.jar](https://repo.maven.apache.org/maven2/org/json/json/20251224/json-20251224.jar) |
+| IBM MQ | [bcprov-jdk18on-1.83.jar](https://repo.maven.apache.org/maven2/org/bouncycastle/bcprov-jdk18on/1.83/bcprov-jdk18on-1.83.jar) |
+| IBM MQ | [bcpkix-jdk18on-1.83.jar](https://repo.maven.apache.org/maven2/org/bouncycastle/bcpkix-jdk18on/1.83/bcpkix-jdk18on-1.83.jar) |
+| IBM MQ | [bcutil-jdk18on-1.83.jar](https://repo.maven.apache.org/maven2/org/bouncycastle/bcutil-jdk18on/1.83/bcutil-jdk18on-1.83.jar) |
+
+On Windows, paste this location into File Explorer:
+
+```text
+%USERPROFILE%\.cache\jmsbrowser\clients
+```
+
+On Linux/macOS, use:
+
+```text
+~/.cache/jmsbrowser/clients
+```
+
+Create the folder if necessary and place all eight JARs directly inside it.
+Preserve their filenames and do not extract them. If `JMSBROWSER_CLIENT_DIR` is
+set, place the files in that directory instead. You can also copy the matching
+JARs from a working installation's client cache.
+
+Restart the browser after copying. No `--install-clients` command or internet
+access is required to load these clients. Python dependencies and a JVM must
+already be installed as described above. To check Java and the JAR checksums
+without downloading anything or connecting to a broker, run from the project
+directory with the virtual environment activated:
+
+```sh
+python -m jmsbrowser --doctor
+```
 
 ## Proposed next features
 
