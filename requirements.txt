@@ -1,0 +1,3 @@
+# Install the application and its bundled Java runtime.
+# Dependency versions and Windows-only packages are defined in pyproject.toml.
+-e .[java]

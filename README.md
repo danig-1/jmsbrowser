@@ -19,7 +19,7 @@ Windows PowerShell:
 
 ```powershell
 python -m venv .venv
-.\.venv\Scripts\python.exe -m pip install -e '.[java]'
+.\.venv\Scripts\python.exe -m pip install -r requirements.txt
 .\.venv\Scripts\python.exe -m jmsbrowser --install-clients
 .\.venv\Scripts\python.exe run.py --demo
 ```
@@ -29,10 +29,15 @@ Linux/macOS:
 ```sh
 python3 -m venv .venv
 source .venv/bin/activate
-pip install -e '.[java]'
+pip install -r requirements.txt
 python -m jmsbrowser --install-clients
 python run.py --demo
 ```
+
+`requirements.txt` installs the application in editable mode with the bundled
+Java runtime. Dependency versions and platform-specific packages come from
+`pyproject.toml`. To use an existing Java 21+ installation instead, install with
+`python -m pip install -e .`.
 
 Start the broker containers separately from the project directory:
 
