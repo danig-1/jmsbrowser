@@ -1,0 +1,1 @@
+{"event":"order.created","order_id":"ORD-1042","customer":"Ada Lovelace","total":129.90,"currency":"EUR","items":[{"sku":"KB-01","quantity":1}],"source":"web-shop"}

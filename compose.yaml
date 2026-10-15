@@ -1,0 +1,111 @@
+name: jmsbrowser-dev
+
+services:
+  artemis:
+    image: apache/artemis:2.57.0-alpine
+    environment:
+      ARTEMIS_USER: artemis
+      ARTEMIS_PASSWORD: artemis-local-123
+      ANONYMOUS_LOGIN: "false"
+      EXTRA_ARGS: >-
+        --http-host 0.0.0.0 --relax-jolokia
+        --queues DEV.ORDERS,DEV.PAYMENTS,DEV.NOTIFICATIONS,DEV.EMPTY
+    ports:
+      - "127.0.0.1:61616:61616"
+      - "127.0.0.1:8161:8161"
+    volumes:
+      - artemis-data:/var/lib/artemis-instance
+    healthcheck:
+      test:
+        - CMD-SHELL
+        - >-
+          /opt/artemis/bin/artemis check node --up
+          --url tcp://localhost:61616
+          --user "$$ARTEMIS_USER" --password "$$ARTEMIS_PASSWORD"
+      interval: 10s
+      timeout: 15s
+      retries: 30
+      start_period: 30s
+
+  ibm:
+    image: icr.io/ibm-messaging/mq:9.4.5.0-r1
+    environment:
+      # IBM MQ Advanced for Developers; local development use only.
+      LICENSE: accept
+      MQ_QMGR_NAME: QM1
+      MQ_CONNAUTH_USE_HTP: "true"
+      MQ_ENABLE_EMBEDDED_WEB_SERVER: "true"
+    ports:
+      - "127.0.0.1:1414:1414"
+      - "127.0.0.1:9443:9443"
+    volumes:
+      - ibm-data:/mnt/mqm
+      - ./dev/ibm/20-queues.mqsc:/etc/mqm/20-queues.mqsc:ro
+    secrets:
+      - mqAppPassword
+      - mqAdminPassword
+    healthcheck:
+      test: ["CMD", "chkmqready"]
+      interval: 10s
+      timeout: 10s
+      retries: 30
+      start_period: 40s
+
+  artemis-seed:
+    image: apache/artemis:2.57.0-alpine
+    user: "0:0"
+    entrypoint: ["/bin/sh", "/seed/artemis.sh"]
+    environment:
+      ARTEMIS_USER: artemis
+      ARTEMIS_PASSWORD: artemis-local-123
+    depends_on:
+      artemis:
+        condition: service_healthy
+    volumes:
+      - ./dev/seed:/seed:ro
+      - ./dev/messages:/messages:ro
+      - seed-state:/seed-state
+
+  artemis-loadtest-seed:
+    image: apache/artemis:2.57.0-alpine
+    user: "0:0"
+    entrypoint: ["/bin/sh", "/seed/artemis-loadtest.sh"]
+    environment:
+      ARTEMIS_USER: artemis
+      ARTEMIS_PASSWORD: artemis-local-123
+    depends_on:
+      artemis:
+        condition: service_healthy
+    volumes:
+      - ./dev/seed:/seed:ro
+      - ./dev/loadtest-message.json:/loadtest-message.json:ro
+      - seed-state:/seed-state
+
+  ibm-seed:
+    image: icr.io/ibm-messaging/mq:9.4.5.0-r1
+    user: "0:0"
+    entrypoint: ["/bin/bash", "/seed/ibm.sh"]
+    environment:
+      MQSERVER: "DEV.APP.SVRCONN/TCP/ibm(1414)"
+      MQSAMP_USER_ID: app
+    depends_on:
+      ibm:
+        condition: service_healthy
+    secrets:
+      - mqAppPassword
+    volumes:
+      - ./dev/seed:/seed:ro
+      - ./dev/messages:/messages:ro
+      - seed-state:/seed-state
+
+secrets:
+  # Deliberately public local-development credentials; never use on real brokers.
+  mqAppPassword:
+    file: ./dev/secrets/mqAppPassword.txt
+  mqAdminPassword:
+    file: ./dev/secrets/mqAdminPassword.txt
+
+volumes:
+  artemis-data:
+  ibm-data:
+  seed-state:

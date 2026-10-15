@@ -1,0 +1,33 @@
+# Copy to config.yaml or pass --config config.example.yaml.
+# These names, ports, queues and credentials match compose.yaml.
+connections:
+  - name: Local Artemis
+    type: artemis
+    host: localhost
+    port: 61616
+    username: artemis
+    password_env: ARTEMIS_PASSWORD
+    # Compose publishes IPv4 loopback; avoid a slow ::1-to-IPv4 fallback on Windows.
+    management_url: http://127.0.0.1:8161/console/jolokia
+    queue_pattern: DEV.*
+    auto_connect: false
+
+  - name: Local IBM MQ
+    type: ibm
+    host: localhost
+    port: 1414
+    queue_manager: QM1
+    channel: DEV.APP.SVRCONN
+    username: app
+    password_env: MQ_APP_PASSWORD
+    model_queue: DEV.APP.MODEL.QUEUE
+    reply_prefix: DEV.JMSBROWSER.*
+    queue_pattern: DEV.*
+    auto_connect: false
+
+ui:
+  theme: reader
+  browse_limit: 1000  # show the complete local DEV.LOADTEST fixture
+  refresh_seconds: 0  # manual refresh by default
+  mouse: true
+  max_body_bytes: 262144

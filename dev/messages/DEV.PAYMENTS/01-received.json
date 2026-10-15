@@ -1,0 +1,1 @@
+{"event":"payment.received","payment_id":"PAY-501","order_id":"ORD-1042","amount":129.90,"currency":"EUR","method":"card"}

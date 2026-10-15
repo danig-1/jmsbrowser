@@ -1,0 +1,1 @@
+{"event":"order.created","order_id":"ORD-1043","customer":"Grace Hopper","total":74.50,"currency":"EUR","items":[{"sku":"MS-02","quantity":2}],"source":"mobile-app"}

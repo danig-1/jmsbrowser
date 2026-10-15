@@ -1,0 +1,46 @@
+{
+  "artemis": [
+    {
+      "filename": "artemis-jms-client-all-2.57.0.jar",
+      "url": "https://repo.maven.apache.org/maven2/org/apache/artemis/artemis-jms-client-all/2.57.0/artemis-jms-client-all-2.57.0.jar",
+      "sha256": "a60bc90946368c5908908fd82ef8cec6e8401a1fd3805ebda1d7ccd9c6b1ddee"
+    },
+    {
+      "filename": "slf4j-simple-2.0.17.jar",
+      "url": "https://repo.maven.apache.org/maven2/org/slf4j/slf4j-simple/2.0.17/slf4j-simple-2.0.17.jar",
+      "sha256": "ddfea59ac074c6d3e24ac2c38622d2d963895e17f70b38ed4bdae4d780be6964"
+    }
+  ],
+  "ibm": [
+    {
+      "filename": "com.ibm.mq.allclient-9.4.5.0.jar",
+      "url": "https://repo.maven.apache.org/maven2/com/ibm/mq/com.ibm.mq.allclient/9.4.5.0/com.ibm.mq.allclient-9.4.5.0.jar",
+      "sha256": "37dc74d9ff93b42e242f82d1df85fbf85d9967cd2f21d6ab88c3089776a6a0a9"
+    },
+    {
+      "filename": "javax.jms-api-2.0.1.jar",
+      "url": "https://repo.maven.apache.org/maven2/javax/jms/javax.jms-api/2.0.1/javax.jms-api-2.0.1.jar",
+      "sha256": "aa4a16fac46d949b17b32091036e4d1e3c812ef3b4bd184ec838efffb53ba4f8"
+    },
+    {
+      "filename": "json-20251224.jar",
+      "url": "https://repo.maven.apache.org/maven2/org/json/json/20251224/json-20251224.jar",
+      "sha256": "2a3438fbf9293174ea82bdfa35e83d8b965cfe6bddc034a1ac5d60107174c209"
+    },
+    {
+      "filename": "bcprov-jdk18on-1.83.jar",
+      "url": "https://repo.maven.apache.org/maven2/org/bouncycastle/bcprov-jdk18on/1.83/bcprov-jdk18on-1.83.jar",
+      "sha256": "82cf3a2af766c3bc874f6d36b9f20a8b99a8f09762dc776e8a227a45d8daaafb"
+    },
+    {
+      "filename": "bcpkix-jdk18on-1.83.jar",
+      "url": "https://repo.maven.apache.org/maven2/org/bouncycastle/bcpkix-jdk18on/1.83/bcpkix-jdk18on-1.83.jar",
+      "sha256": "d3c4c6b700c74ef8164bb15e549d939721b8f14fc0ff89fe19b220243bcfcbd8"
+    },
+    {
+      "filename": "bcutil-jdk18on-1.83.jar",
+      "url": "https://repo.maven.apache.org/maven2/org/bouncycastle/bcutil-jdk18on/1.83/bcutil-jdk18on-1.83.jar",
+      "sha256": "ee7d0eb4e74de70a735f7fb36b604dd5c6ad35720d50b914604db042114a0185"
+    }
+  ]
+}
