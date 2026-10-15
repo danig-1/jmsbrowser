@@ -2,7 +2,7 @@ name: jmsbrowser-dev
 
 services:
   artemis:
-    image: apache/artemis:2.57.0-alpine
+    image: docker.io/apache/artemis:2.57.0-alpine
     environment:
       ARTEMIS_USER: artemis
       ARTEMIS_PASSWORD: artemis-local-123
@@ -52,7 +52,7 @@ services:
       start_period: 40s
 
   artemis-seed:
-    image: apache/artemis:2.57.0-alpine
+    image: docker.io/apache/artemis:2.57.0-alpine
     user: "0:0"
     entrypoint: ["/bin/sh", "/seed/artemis.sh"]
     environment:
@@ -67,7 +67,7 @@ services:
       - seed-state:/seed-state
 
   artemis-loadtest-seed:
-    image: apache/artemis:2.57.0-alpine
+    image: docker.io/apache/artemis:2.57.0-alpine
     user: "0:0"
     entrypoint: ["/bin/sh", "/seed/artemis-loadtest.sh"]
     environment:

@@ -40,6 +40,12 @@ Start the broker containers separately from the project directory:
 docker compose up -d
 ```
 
+Or start the same broker fixtures with Podman using the separate Python launcher:
+
+```sh
+python start_podman.py
+```
+
 Start the browser directly with Python on Windows:
 
 ```powershell
@@ -309,8 +315,9 @@ See [the implementation notes](docs/PLAN.md) and the
 
 ## Local brokers
 
-Requires Docker Desktop running Linux containers (or Docker Engine) and Docker
-Compose. The images are pinned to verified published tags. IBM MQ uses the
+Use Docker Desktop running Linux containers (or Docker Engine) with Docker
+Compose, or Podman with a configured Compose provider. The images are pinned to
+verified published tags and use fully qualified registry names. IBM MQ uses the
 **Advanced for Developers** image. `compose.yaml` sets `LICENSE=accept`, so starting
 it accepts the IBM MQ developer license. Use this setup for local development.
 
@@ -320,6 +327,33 @@ docker compose ps -a
 docker compose logs artemis-seed ibm-seed artemis-loadtest-seed
 python tools/verify_brokers.py
 ```
+
+For Podman, use [start_podman.py](start_podman.py), located beside
+`compose.yaml`. It defaults to `podman compose --file compose.yaml up -d` and
+accepts other Compose commands:
+
+```sh
+python start_podman.py
+python start_podman.py ps -a
+python start_podman.py logs artemis-seed ibm-seed artemis-loadtest-seed
+python start_podman.py down
+```
+
+The direct startup command is also available:
+
+```sh
+podman compose --file compose.yaml up -d
+```
+
+Install Podman 4.7+ and [set up a Compose provider](https://podman-desktop.io/docs/compose/setting-up-compose)
+first. On Windows/macOS, create and start a Podman machine (Podman Desktop can do
+this). [Podman Compose](https://docs.podman.io/en/latest/markdown/podman-compose.1.html)
+delegates to an installed provider such as Docker Compose or podman-compose.
+The launcher needs no Python packages and resolves the Compose file relative to
+itself, so it also works when invoked from another directory. It returns the
+provider's exit code. Run either Docker or Podman at a time; both use the same
+host ports. Each engine keeps its own broker volumes and seed markers.
+The fixture verification script above currently uses Docker Compose.
 
 `up` waits for both brokers to become healthy before starting the sample
 producers. The three seed services should finish with **Exited (0)**; both brokers stay
@@ -356,8 +390,9 @@ certificate. The checked-in secret files contain deliberately public development
 passwords, supplied to IBM through Compose secrets. Keep real credentials outside
 the YAML; the browser config references environment variables.
 
-Data and seed markers live in named Docker volumes. Ordinary `docker compose down`
-preserves messages, and subsequent startup skips completed seeding. Seed markers
+Data and seed markers live in named volumes in the selected engine. Ordinary
+`docker compose down` or `python start_podman.py down` preserves messages, and
+subsequent startup skips completed seeding. Seed markers
 make normal restarts repeatable; a failure between sending messages and saving
 the marker can leave partial fixtures. For this disposable environment, reset all
 three volumes together to recreate a clean sample set:
