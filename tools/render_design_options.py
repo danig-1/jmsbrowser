@@ -2,7 +2,7 @@
 
 All data is illustrative. This script does not connect to brokers, send messages,
 or change application behavior. Requires the optional Pillow dependency.
-Run: python tools/render_design_options.py
+Run: python -m tools.render_design_options
 """
 import json
 from pathlib import Path

@@ -11,7 +11,7 @@ message's body, headers and properties below the table.
 ## Install and run
 
 Python 3.11+ is required. Real broker connections use JMS provider clients through
-JPype and require a JVM. The optional `java` extra supplies a private runtime
+JPype and require a JVM. `jdk4py` in `requirements.txt` supplies a private runtime
 inside the virtual environment; an existing Java 21+ installation with `JAVA_HOME`
 also works. Offline demo mode does not start Java or access a broker.
 
@@ -36,9 +36,10 @@ python run.py --demo
 
 `requirements.txt` explicitly lists the runtime packages, including the bundled
 Java runtime and a Windows-only marker for `windows-curses`. Run the application
-from this checkout with `python run.py`. For an installed `jmsbrowser` command,
-also run `python -m pip install -e .`. If you use your own Java 21+ installation,
-you can omit the `jdk4py` line from the requirements.
+from this checkout with `python run.py`, or use `python -m jmsbrowser` with your
+own configuration. Run the commands below from the project directory. If you
+use your own Java 21+ installation, you can omit the `jdk4py` line from the
+requirements.
 
 Start the broker containers separately from the project directory:
 
@@ -273,11 +274,11 @@ explicit review/send flow; JSON and PNG exports remain non-consuming reads.
 For non-interactive browsing and exporting the application screen:
 
 ```sh
-jmsbrowser --config config.example.yaml --connection "Local IBM MQ" --queue DEV.ORDERS --dump
-jmsbrowser --config config.example.yaml --queue DEV.ORDERS --screenshot screen.png
+python -m jmsbrowser --config config.example.yaml --connection "Local IBM MQ" --queue DEV.ORDERS --dump
+python -m jmsbrowser --config config.example.yaml --queue DEV.ORDERS --screenshot screen.png
 ```
 
-PNG export requires Pillow (`pip install '.[dev]'`) and renders the same grid as
+PNG export requires Pillow (`python -m pip install -r tools/requirements-mockups.txt`) and renders the same grid as
 curses from an actual browse result. It closes the connection after exporting.
 
 ## Proposed next features
@@ -299,7 +300,7 @@ Selectors are supported by the
 [JMS QueueBrowser API](https://docs.oracle.com/javaee/7/api/javax/jms/QueueSession.html).
 The send controls correspond to
 [JMS producer options](https://docs.oracle.com/javaee/7/api/javax/jms/MessageProducer.html).
-Regenerate the three proposals with `python tools/render_feature_options.py`.
+Regenerate the three proposals with `python -m tools.render_feature_options`.
 
 ## Original design alternatives
 
@@ -332,7 +333,7 @@ development.
 docker compose up -d
 docker compose ps -a
 docker compose logs artemis-seed ibm-seed artemis-loadtest-seed
-python tools/verify_brokers.py
+python -m tools.verify_brokers
 ```
 
 For Podman, use [compose.podman.yaml](compose.podman.yaml), located beside the
@@ -410,9 +411,9 @@ consumption by another application requires a reset before running it again.
 
 ```sh
 python -m pip install -r tools/requirements-mockups.txt
-python tools/render_mockups.py
-python tools/render_design_options.py
-python tools/render_ui_improvements.py
+python -m tools.render_mockups
+python -m tools.render_design_options
+python -m tools.render_ui_improvements
 ```
 
 The renderer finds Consolas on Windows or DejaVu Sans Mono on Linux, or accepts
@@ -427,11 +428,16 @@ JSON/XML body examples.
 ## Tests
 
 ```powershell
-.\.venv\Scripts\python.exe -m pip install -e '.[java,dev]'
+.\.venv\Scripts\python.exe -m pip install -r requirements-dev.txt
 .\.venv\Scripts\python.exe -m pytest -q
 $env:JMSBROWSER_INTEGRATION = '1'
 .\.venv\Scripts\python.exe -m pytest -m integration -q
 ```
+
+With an activated virtual environment on any platform, use
+`python -m pip install -r requirements-dev.txt`, then `python -m pytest -q`.
+The development requirements include runtime packages, pytest and Pillow.
+`pytest.ini` selects the tests directory and registers the integration marker.
 
 The integration tests use the application's real JMS adapters, repeat browsing
 on both providers, validate every JSON fixture and requested message column,

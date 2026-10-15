@@ -2,7 +2,7 @@
 
 All queue contents, samples and drafts in these screenshots are illustrative.
 This script does not connect to brokers or implement the proposed actions.
-Run with the optional Pillow dependency: python tools/render_feature_options.py
+Run with the optional Pillow dependency: python -m tools.render_feature_options
 """
 from dataclasses import replace
 from datetime import datetime, timedelta

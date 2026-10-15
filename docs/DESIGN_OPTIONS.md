@@ -95,7 +95,7 @@ their graphical widgets:
 ## Re-render
 
 ```powershell
-.\.venv\Scripts\python.exe tools/render_design_options.py
+.\.venv\Scripts\python.exe -m tools.render_design_options
 ```
 
 Pillow is needed only for PNG export. The script does not connect to a broker,

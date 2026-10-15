@@ -1,0 +1,5 @@
+-r requirements.txt
+
+# Test runner and screenshot generation.
+pytest>=8,<10
+Pillow>=11,<13

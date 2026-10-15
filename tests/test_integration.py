@@ -79,7 +79,7 @@ def test_consumer_inquiry_detects_input_only_and_does_not_consume(index, monkeyp
         before = client.request("connect")
         empty = client.request("consumers", queue="DEV.EMPTY")
         assert empty["consumers"] == []
-        fixture = subprocess.Popen([sys.executable, "-u", str(ROOT / "tests/consumer_fixture.py"), str(index)],
+        fixture = subprocess.Popen([sys.executable, "-u", "-m", "tests.consumer_fixture", str(index)],
                                    cwd=ROOT, stdin=subprocess.PIPE, stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True,
                                    creationflags=subprocess.CREATE_NO_WINDOW if sys.platform == "win32" else 0)
         try:

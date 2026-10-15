@@ -39,7 +39,7 @@ def classpath(provider):
     for artifact in manifest()[provider]:
         path = client_dir() / artifact["filename"]
         if not path.is_file() or hashlib.sha256(path.read_bytes()).hexdigest() != artifact["sha256"]:
-            raise RuntimeError("JMS clients missing or damaged. Run: jmsbrowser --install-clients")
+            raise RuntimeError("JMS clients missing or damaged. Run: python -m jmsbrowser --install-clients")
         paths.append(str(path))
     return paths
 

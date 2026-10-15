@@ -7,6 +7,7 @@ import pytest
 
 from jmsbrowser.brokers import bounded_text
 from jmsbrowser.client import BrokerError, WorkerClient
+from jmsbrowser.config import ConnectionConfig
 from jmsbrowser.domain import Message, format_size
 
 
@@ -45,3 +46,15 @@ def test_worker_deadline_kills_unresponsive_process():
         client.request("queues")
     assert client.process.killed and client.closed
     assert time.monotonic() - started < 1
+
+
+def test_source_worker_browses_when_parent_runs_outside_checkout(tmp_path, monkeypatch):
+    monkeypatch.chdir(tmp_path)
+    monkeypatch.delenv("PYTHONPATH", raising=False)
+    with WorkerClient(ConnectionConfig("Offline Artemis", "artemis"), demo=True) as client:
+        queues = client.request("connect")
+        assert any(queue["name"] == "DEV.ORDERS" and queue["depth"] == 3 for queue in queues)
+        first = client.request("browse", queue="DEV.ORDERS", limit=100, max_body_bytes=262144)
+        second = client.request("browse", queue="DEV.ORDERS", limit=100, max_body_bytes=262144)
+        assert len(first) == 3
+        assert first == second

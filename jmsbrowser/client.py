@@ -26,7 +26,7 @@ class WorkerClient:
         flags = subprocess.CREATE_NO_WINDOW if sys.platform == "win32" else 0
         self.process = subprocess.Popen([sys.executable, "-m", "jmsbrowser.worker"], stdin=subprocess.PIPE,
                                         stdout=subprocess.PIPE, stderr=self.log, text=True, encoding="utf-8",
-                                        creationflags=flags, bufsize=1)
+                                        creationflags=flags, bufsize=1, cwd=Path(__file__).resolve().parents[1])
         threading.Thread(target=self._read, daemon=True).start()
 
     def _read(self):

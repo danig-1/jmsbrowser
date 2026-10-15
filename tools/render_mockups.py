@@ -1,7 +1,7 @@
 """Render reproducible terminal UI proposals. Requires Pillow; no live broker access.
 
 Every element sits on a character grid and maps to curses text/color attributes.
-Usage: python tools/render_mockups.py [--font /path/to/monospace.ttf]
+Usage: python -m tools.render_mockups [--font /path/to/monospace.ttf]
 """
 
 from __future__ import annotations

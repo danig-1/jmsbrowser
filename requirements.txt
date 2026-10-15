@@ -1,4 +1,4 @@
-# Application runtime packages; keep ranges aligned with pyproject.toml.
+# Application runtime packages.
 JPype1>=1.7,<2
 PyYAML>=6.0.3,<7
 wcwidth>=0.2.14,<1
