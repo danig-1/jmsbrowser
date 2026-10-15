@@ -6,7 +6,7 @@ from wcwidth import wcswidth
 
 from jmsbrowser.config import Config, ConnectionConfig
 from jmsbrowser.demo import DemoAdapter
-from jmsbrowser.domain import Consumer, ConsumerSnapshot, Message
+from jmsbrowser.domain import Consumer, ConsumerSnapshot, Message, QueueInfo
 from jmsbrowser.screen import HEADERS, ViewOptions, render, short_id
 from jmsbrowser.state import Controller
 from jmsbrowser.ui import TerminalApp
@@ -253,6 +253,28 @@ def test_selected_depth_loading_indicator_replaces_only_its_number(controller):
             assert lines[y][depth_x:depth_x + 5].strip() == ("..." if index == state.queue_index else str(state.queues[index].depth))
 
 
+@pytest.mark.parametrize("depth", [10000, 100000, 2147483647, 9223372036854775807])
+@pytest.mark.parametrize("width,height,requested", [(120, 28, None), (120, 28, (18, 24)), (160, 46, None)])
+def test_large_depths_show_every_digit_without_overlapping_names_or_borders(controller, depth, width, height, requested):
+    controller.current.queues = [QueueInfo("APP.ORDERS", depth), QueueInfo("APP.SMALL", 2)]
+    controller.current.queue_index = 0
+    view = ViewOptions(panel_widths=requested)
+    frame = render(controller, width, height, view)
+    _, panel_x, _, panel_width, _ = next(region for region in frame.regions if region[0] == "queues")
+    headers = [action for action in frame.actions if action[0] == "queue_sort"]
+    assert headers[0][2] + headers[0][4] < headers[1][2]
+    assert headers[1][2] + headers[1][4] <= panel_x + panel_width - 1
+    for (kind, y), index in frame.row_hits.items():
+        if kind != "queues":
+            continue
+        row = frame.plain_lines()[y][panel_x + 1:panel_x + panel_width - 1]
+        expected = str(controller.current.queues[index].depth)
+        assert row.rstrip().endswith(expected)
+        assert "APP." in row[:row.rfind(expected)]
+        assert frame.plain_lines()[y][panel_x] == frame.plain_lines()[y][panel_x + panel_width - 1] == "│"
+    assert all(wcswidth(line) == width for line in frame.plain_lines())
+
+
 @pytest.mark.parametrize("tab", [1, 2])
 @pytest.mark.parametrize("fullscreen", [False, True])
 def test_metadata_tables_right_align_keys_and_keep_them_fixed_when_values_scroll(controller, tab, fullscreen):
@@ -397,6 +419,7 @@ def test_message_list_and_detail_each_occupy_half_the_panel(controller, width, h
     controller.current.messages *= 30
     frame = render(controller, width, height)
     _, _, top, _, panel_height = next(region for region in frame.regions if region[0] == "messages")
+    assert top + panel_height == height - 1  # Panels reclaim the former status area.
     _, _, detail_top, _, detail_height = next(region for region in frame.regions if region[0] == "detail")
     list_height = detail_top - top - 2  # outer title/border row and shared separator
     assert abs(list_height - detail_height) <= 1
@@ -518,7 +541,7 @@ def test_active_title_and_row_are_distinct_from_inactive_selection(controller, p
 
 
 @pytest.mark.parametrize("fullscreen", [False, True])
-@pytest.mark.parametrize("payload", ['{"note": "' + 'Long text ' * 150 + '"}', '<event id="1">' + 'Long text ' * 150 + '</event>', 'Long text ' * 150])
+@pytest.mark.parametrize("payload", ['{"note": "' + 'Long text ' * 300 + '"}', '<event id="1">' + 'Long text ' * 300 + '</event>', 'Long text ' * 300])
 def test_body_wrap_scroll_controls_and_colors_in_both_views(controller, fullscreen, payload):
     app = TerminalApp(controller)
     app.view.fullscreen = fullscreen

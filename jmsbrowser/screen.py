@@ -19,10 +19,12 @@ ASCII_MAP = str.maketrans({"┌": "+", "┐": "+", "└": "+", "┘": "+", "─"
 MIN_PANEL_WIDTHS = (18, 24, 66)
 
 
-def panel_widths(width, requested=None):
+def panel_widths(width, requested=None, depth_width=5):
     """Clamp a session layout to the terminal, keeping all columns usable."""
-    left, middle = requested or (max(22, min(28, width // 6)), max(26, min(34, width // 5)))
+    left, middle = requested or (max(22, min(28, width // 6)), max(30, min(38, width // 5 + 4)))
     minimum_left, minimum_middle, minimum_right = MIN_PANEL_WIDTHS
+    # Keep room for Queue ↑, a column gap, and the panel margins.
+    minimum_middle = min(max(minimum_middle, depth_width + 12), width - minimum_left - minimum_right - 2)
     left = max(minimum_left, min(left, width - minimum_middle - minimum_right - 2))
     middle = max(minimum_middle, min(middle, width - left - minimum_right - 2))
     return left, middle
@@ -339,14 +341,15 @@ def render(controller, width, height, view=None):
     frame.text(2, 0, "JMS BROWSER", "accent", "bar")
     if controller.demo:
         frame.text(17, 0, "DEMO", bg="bar")
-    frame.text(width - 15, 0, "NON-CONSUMING", "green", "bar")
-    panel_y, panel_h = 2, height - 6
+    panel_y, panel_h = 2, height - 3
     if view.fullscreen:
         frame.box(0, panel_y, width, panel_h, "Message detail · Escape returns", True)
         frame.regions.append(("detail", 1, panel_y + 1, width - 2, panel_h - 2))
         draw_detail(frame, state, controller, view, 1, panel_y + 2, width - 2, panel_h - 4)
     else:
-        left, middle = frame.panel_widths = panel_widths(width, view.panel_widths)
+        queue_order = queue_indices(state.queues, view)
+        depth_width = max(5, max((len(str(state.queues[index].depth)) for index in queue_order), default=1))
+        left, middle = frame.panel_widths = panel_widths(width, view.panel_widths, depth_width)
         right_x, right_w = left + middle + 2, width - left - middle - 2
         for pane, x, w, title in ((0, 0, left, "1 Connections"), (1, left + 1, middle, "2 Queues"), (2, right_x, right_w, "3 Messages")):
             focused = controller.pane == pane
@@ -373,15 +376,17 @@ def render(controller, width, height, view=None):
             frame.row_hits[("connections", y + 1)] = index
         frame.text(2, panel_y + panel_h - 3, f"{sum(s.status == 'connected' for s in controller.connections)} connected", "muted", width=left - 4)
         qx = left + 3
+        depth_x = qx + middle - 4 - depth_width
+        queue_width = depth_x - qx - 1
         if view.filters[1]:
             frame.text(qx, panel_y + 1, "/ " + view.filters[1], "accent", width=middle - 4)
-        for column, title, x in (("name", "Queue", qx), ("depth", "Depth", qx + middle - 10)):
+        for column, title, x in (("name", "Queue", qx), ("depth", "Depth", min(depth_x, qx + middle - 10))):
             active = view.queue_sort == column
             arrow = "↓" if view.queue_sort_descending else "↑"
             label = title + (" " + arrow if active else "")
             frame.text(x, panel_y + 2, label, "accent" if active else "muted", width=7)
             frame.actions.append(("queue_sort", column, x, panel_y + 2, 7))
-        indices = queue_indices(state.queues, view)
+        indices = queue_order
         visible, start = page(indices, state.queue_index, max(1, panel_h - 7))
         for offset, index in enumerate(visible):
             item, y = state.queues[index], panel_y + 4 + offset
@@ -390,9 +395,9 @@ def render(controller, width, height, view=None):
             bg = "selected" if selected and focused else "bar" if selected else "bg"
             role = "accent" if selected and focused else "muted" if selected else "text"
             frame.row(qx, y, middle - 4, "", selected, focused=focused)
-            frame.text(qx, y, ("> " if selected and focused else "  ") + clipped(item.name, middle - 12), role, bg, middle - 10)
+            frame.text(qx, y, ("> " if selected and focused else "  ") + clipped(item.name, queue_width - 2), role, bg, queue_width)
             depth = "..." if state.all_depths_pending or item.name in state.depth_pending else str(item.depth)
-            frame.text(qx + middle - 9, y, f"{depth:>5}", role, bg, 5)
+            frame.text(depth_x, y, depth.rjust(depth_width), role, bg, depth_width)
             frame.row_hits[("queues", y)] = index
         frame.text(qx, panel_y + panel_h - 3, f"{len(indices)} queues", "muted", width=middle - 4)
         mx, available = right_x + 2, right_w - 4
@@ -434,8 +439,6 @@ def render(controller, width, height, view=None):
         for index, divider_x in enumerate((left, right_x - 1)):
             frame.dividers.append((index, divider_x - 1, panel_y, 3, panel_h))
             frame.text(divider_x, panel_y + panel_h // 2, "↔", "accent", "selected" if view.drag_divider == index else "bar")
-    status = state.error or controller.notice
-    frame.text(1, height - 3, status, "error" if state.error else "muted", width=width - 2)
     frame.fill(0, height - 1, width, bg="bar")
     if view.prompt is not None:
         footer = f"Filter: {view.prompt}_   Enter apply · Escape cancel"

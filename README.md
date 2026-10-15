@@ -153,6 +153,8 @@ Connecting a server initially lists queues without loading messages, unless
 does not load messages; refreshes from the other panels reload messages only
 after that queue has been opened. Routing labels and the
 connection/queue breadcrumb line are omitted from the screen.
+The panels extend down to the keyboard shortcut bar; the separate bottom status
+line is omitted.
 The selected depth cell displays `...` while its inquiry is pending. Detail-tab
 labels retain fixed positions and widths; the active tab uses a background highlight.
 The queue panel has no Refresh or Consumers buttons; use the `r refresh` and
@@ -167,6 +169,8 @@ numerically, with equal depths ordered by queue name. Sorting applies to the
 filtered list and stays active across refreshes and connection changes for the
 session. It preserves the selected queue and loaded messages without querying
 the broker; Up / Down follows the displayed order.
+Queue depths are displayed in full, with the depth column expanding for larger
+counts.
 
 Local refresh timing was checked before and after the latest changes. Windows
 tried IPv6 `::1` for `localhost` before falling back to the IPv4-only Compose port,
