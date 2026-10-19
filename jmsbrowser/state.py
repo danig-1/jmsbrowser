@@ -62,8 +62,8 @@ class ConnectionState:
 
 
 class Controller:
-    def __init__(self, config, demo=False):
-        self.config, self.demo = config, demo
+    def __init__(self, config):
+        self.config = config
         self.connections = [ConnectionState(connection) for connection in config.connections]
         self.connection_index, self.pane, self.detail_tab, self.detail_scroll = 0, 0, 1, 0
         self.results = queue.Queue()
@@ -71,7 +71,7 @@ class Controller:
         self.notice = "Enter connects a server. Tab or click changes panels."
         self.closed = False
         for index, connection in enumerate(self.connections):
-            if connection.config.auto_connect or demo:
+            if connection.config.auto_connect:
                 self.connect(index)
 
     @property
@@ -86,7 +86,7 @@ class Controller:
         state.epoch += 1
         state.status, state.error, state.busy = "connecting", "", True
         state.executor = ThreadPoolExecutor(max_workers=1, thread_name_prefix="broker")
-        state.client = WorkerClient(state.config, self.demo)
+        state.client = WorkerClient(state.config)
         self._submit(index, "connect")
 
     def disconnect(self, index=None):

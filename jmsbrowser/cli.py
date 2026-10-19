@@ -7,7 +7,7 @@ import sys
 import time
 
 from . import __version__
-from .config import Config, ConfigError, ConnectionConfig, load_config
+from .config import load_config
 from .domain import Message, QueueInfo
 
 
@@ -15,7 +15,6 @@ def parser():
     result = argparse.ArgumentParser(description="Non-consuming curses queue browser and message composer for IBM MQ and Apache Artemis.")
     result.add_argument("--version", action="version", version=__version__)
     result.add_argument("--config", default="config.yaml", help="YAML connection file (default: config.yaml)")
-    result.add_argument("--demo", action="store_true", help="Offline sample data; no brokers or Java needed")
     result.add_argument("--check-config", action="store_true", help="Validate YAML and exit")
     result.add_argument("--install-clients", action="store_true", help="Download checksum-pinned JMS provider JARs and exit")
     result.add_argument("--doctor", action="store_true", help="Check Java and installed provider clients")
@@ -29,10 +28,10 @@ def parser():
     return result
 
 
-def read_once(config, index, queue_name, demo):
+def read_once(config, index, queue_name):
     from .client import WorkerClient
     connection = config.connections[index]
-    with WorkerClient(connection, demo) as client:
+    with WorkerClient(connection) as client:
         queues = [QueueInfo(**q) for q in client.request("connect")]
         selected = next((q for q in queues if q.name == queue_name), None) if queue_name else next((q for q in queues if q.depth), queues[0] if queues else None)
         if queue_name and selected is None:
@@ -59,7 +58,7 @@ def main(argv=None):
             for provider in ("artemis", "ibm"):
                 print(f"{provider}: {len(classpath(provider))} verified client JARs")
             return 0
-        config = Config((ConnectionConfig("Local Artemis", "artemis"), ConnectionConfig("Local IBM MQ", "ibm", port=1414))) if args.demo else load_config(args.config)
+        config = load_config(args.config)
         if args.check_config:
             print(f"Configuration valid: {len(config.connections)} connections; reader layout.")
             return 0
@@ -67,7 +66,7 @@ def main(argv=None):
         if args.connection and config.connections[index].name != args.connection:
             raise ValueError(f"Connection {args.connection} is not configured.")
         if args.dump or args.screenshot:
-            queues, selected, messages = read_once(config, index, args.queue, args.demo)
+            queues, selected, messages = read_once(config, index, args.queue)
             if args.dump:
                 print(json.dumps({"connection": config.connections[index].name, "queues": [asdict(q) for q in queues], "queue": asdict(selected) if selected else None, "messages": messages}, indent=2, ensure_ascii=True))
             if args.screenshot:
@@ -76,7 +75,6 @@ def main(argv=None):
                 from .screenshot import save_png
                 # Construct the view from the real adapter's result; avoid new connections.
                 controller = Controller(replace(config, connections=tuple(replace(c, auto_connect=False) for c in config.connections)))
-                controller.demo = args.demo
                 controller.connection_index, controller.pane = index, 2
                 state = controller.current
                 state.status, state.queues = "connected", queues
@@ -92,7 +90,7 @@ def main(argv=None):
             raise ValueError("Interactive mode requires a terminal. Use --dump or --screenshot for non-interactive output.")
         from .state import Controller
         from .ui import run
-        controller = Controller(config, args.demo)
+        controller = Controller(config)
         controller.connection_index = index
         if args.queue:
             # Initial queue selection is applied once discovery completes.

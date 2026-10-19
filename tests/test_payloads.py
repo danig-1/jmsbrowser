@@ -48,10 +48,10 @@ def test_worker_deadline_kills_unresponsive_process():
     assert time.monotonic() - started < 1
 
 
-def test_source_worker_browses_when_parent_runs_outside_checkout(tmp_path, monkeypatch):
+def test_source_worker_browses_when_parent_runs_outside_checkout(tmp_path, monkeypatch, sample_worker):
     monkeypatch.chdir(tmp_path)
     monkeypatch.delenv("PYTHONPATH", raising=False)
-    with WorkerClient(ConnectionConfig("Offline Artemis", "artemis"), demo=True) as client:
+    with WorkerClient(ConnectionConfig("Test Artemis", "artemis")) as client:
         queues = client.request("connect")
         assert any(queue["name"] == "DEV.ORDERS" and queue["depth"] == 3 for queue in queues)
         first = client.request("browse", queue="DEV.ORDERS", limit=100, max_body_bytes=262144)
@@ -60,8 +60,8 @@ def test_source_worker_browses_when_parent_runs_outside_checkout(tmp_path, monke
         assert first == second
 
 
-def test_worker_full_message_reads_past_preview_limit_without_consuming():
-    with WorkerClient(ConnectionConfig("Demo", "artemis"), demo=True) as client:
+def test_worker_full_message_reads_past_preview_limit_without_consuming(sample_worker):
+    with WorkerClient(ConnectionConfig("Test Artemis", "artemis")) as client:
         before = client.request("connect")
         preview = client.request("browse", queue="DEV.ORDERS", limit=100, max_body_bytes=5)
         assert preview[0]["truncated"]

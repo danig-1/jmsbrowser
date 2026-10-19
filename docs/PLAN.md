@@ -1,7 +1,9 @@
 # Implementation notes
 
 The selected design is **3 — Payload reader**, with a message table replacing
-the original strip. Columns are **MessageId, Type, Prio, Size, Body**.
+the original strip. Columns are **MessageId, Datetime, Size, Body**.
+Datetime uses the JMS timestamp in local time; type and priority remain in metadata.
+Overlay windows and composer file-path dialogs have clickable X close controls.
 Narrow connection and queue panels leave the remaining width for that table
 and selected-message detail. `docs/designs/04-implemented-reader.png` exports the
 implemented character-grid renderer with real Artemis sample messages.
@@ -48,7 +50,7 @@ JMS timestamps retain raw milliseconds plus a local datetime with UTC offset.
   Unicode/control-character handling and an ASCII fallback.
 - `ui.py`: curses output, keyboard/mouse controls, resizing and detail scrolling.
 - `cli.py`: interactive startup, configuration/runtime checks, JSON and PNG export.
-- `demo.py`: offline sample data with no Java or network requirement.
+- `tools/sample_data.py`: fixtures for tests and developer screenshot tools.
 
 ## Provider behavior
 
@@ -76,7 +78,7 @@ are discarded after disconnects or queue selection changes.
 Send jobs preserve their original destination and submitted payload, prevent
 concurrent duplicate dispatch, and report uncertain delivery after a timeout or
 connection loss instead of automatically retrying. Success refreshes the selected
-queue's depth and message view. Demo mode simulates sends only in memory.
+queue's depth and message view.
 
 Text preserves the original body and displays formatted JSON when possible.
 Text size is UTF-8 payload bytes; byte messages use getBodyLength and show hex.

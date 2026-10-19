@@ -7,7 +7,7 @@ close controls. Mouse selection, double-click details and scrolling are supporte
 The queue panel's buttons have been removed; the bottom bar shows `c consumers`
 and `r refresh`. Inside the inspector, `r` has no action.
 
-Implemented inspector with illustrative demo consumers:
+Implemented inspector with illustrative consumer data:
 
 ![Implemented inspector](designs/consumers-implemented.png)
 

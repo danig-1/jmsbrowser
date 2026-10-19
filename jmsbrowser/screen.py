@@ -7,13 +7,13 @@ import time
 
 from wcwidth import wcwidth, wcswidth
 
-from .domain import format_size
+from .domain import format_message_datetime, format_size
 from .body_view import body_layout
 from .terminal_text import cell_offset, clipped, safe_text
 
 PALETTE = {"bg": "#192322", "text": "#e5e9df", "muted": "#9aaea3", "border": "#4b6257",
            "accent": "#c4d891", "selected": "#364b3c", "green": "#8bd5a0", "error": "#edaaa0", "bar": "#2a3932"}
-HEADERS = ("MessageId", "Type", "Prio", "Size", "Body")
+HEADERS = ("MessageId", "Datetime", "Size", "Body")
 MIN_WIDTH, MIN_HEIGHT = 120, 28
 ASCII_MAP = str.maketrans({"┌": "+", "┐": "+", "└": "+", "┘": "+", "─": "-", "│": "|", "●": "*", "○": "o", "…": "~", "·": ".", "↑": "^", "↓": "v", "←": "<", "→": ">", "↔": "|"})
 
@@ -110,6 +110,11 @@ class Frame:
         self.fill(x, y, width, bg=bg)
         self.text(x, y, text, "accent" if selected and focused else "muted" if selected else role, bg, width)
 
+    def close_button(self, x, y, width, action):
+        left = x + width - 5
+        self.text(left, y, " X ", "accent", "bar", 3)
+        self.actions.insert(0, (action, None, left, y, 3))
+
     def divider_at(self, x, y):
         for index, left, top, width, height in self.dividers:
             if left <= x < left + width and top <= y < top + height:
@@ -156,8 +161,8 @@ def page(indices, selected, count):
 
 def table_widths(available):
     identity = min(40, max(14, available // 4))
-    widths = [identity, 11, 4, 12, 0]
-    widths[4] = available - sum(widths) - 8  # two spaces between columns
+    widths = [identity, 19, 12, 0]
+    widths[3] = available - sum(widths) - 6  # two spaces between columns
     return widths
 
 
@@ -304,6 +309,7 @@ def draw_consumer_inspector(frame, controller, view):
     # The inspector is modal: underlying panel actions cannot receive clicks.
     frame.actions, frame.regions, frame.row_hits = [], [], {}
     frame.dividers = []
+    frame.close_button(x, y, width, "close_consumers")
     for focus, label, action, left in ((1, " Refresh consumers ", "refresh_consumers", x + 3),
                                        (2, " Close ", "close_consumers", x + width - 11)):
         active = view.consumer_focus == focus
@@ -368,11 +374,10 @@ def render(controller, width, height, view=None):
     state = controller.current
     frame.fill(0, 0, width, bg="bar")
     frame.text(2, 0, "JMS BROWSER", "accent", "bar")
-    if controller.demo:
-        frame.text(17, 0, "DEMO", bg="bar")
     panel_y, panel_h = 2, height - 3
     if view.fullscreen:
         frame.box(0, panel_y, width, panel_h, "Message detail · Escape returns", True)
+        frame.close_button(0, panel_y, width, "close_detail")
         frame.regions.append(("detail", 1, panel_y + 1, width - 2, panel_h - 2))
         draw_detail(frame, state, controller, view, 1, panel_y + 2, width - 2, panel_h - 4)
     else:
@@ -453,7 +458,8 @@ def render(controller, width, height, view=None):
             if selected and focused:
                 frame.text(mx - 1, y, ">", "accent")
             x = mx
-            values = (short_id(message.message_id, column_widths[0]), message.type, str(message.priority), format_size(message.size), " ".join(message.body.split()))
+            values = (short_id(message.message_id, column_widths[0]), format_message_datetime(message.headers.get("JMSTimestamp")),
+                      format_size(message.size), " ".join(message.body.split()))
             for value, column_width in zip(values, column_widths):
                 frame.text(x, y, value, role, bg, column_width)
                 x += column_width + 2
@@ -476,7 +482,7 @@ def render(controller, width, height, view=None):
     elif view.fullscreen:
         footer = "Tab/Shift+Tab/click tabs  ↑↓/PgUp/PgDn scroll  n compose  c consumers  r refresh  Esc back  q quit"
     else:
-        footer = "Tab/click panels  ↑↓ select  Enter connect/browse/detail  n compose  c consumers  r refresh  h tabs  / filter  q quit"
+        footer = "↑↓ select  Enter connect/browse/detail  n compose  c consumers  r refresh  h tabs  / filter  q quit"
     frame.text(1, height - 1, footer, "accent", "bar", width - 2)
     if view.consumer_inspector:
         draw_consumer_inspector(frame, controller, view)

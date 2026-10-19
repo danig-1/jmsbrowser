@@ -10,7 +10,7 @@ import json
 from pathlib import Path
 
 from jmsbrowser.config import Config, ConnectionConfig
-from jmsbrowser.demo import DemoAdapter
+from tools.sample_data import SampleAdapter
 from jmsbrowser.domain import Message, QueueInfo
 from jmsbrowser.screen import render
 from jmsbrowser.screenshot import save_png
@@ -41,7 +41,7 @@ def base(option, title, queue_name="DEV.ORDERS"):
                      ConnectionConfig("Local IBM MQ", "ibm", port=1414, queue_manager="QM1")))
     controller = Controller(config)
     for state in controller.connections:
-        adapter = DemoAdapter(state.config)
+        adapter = SampleAdapter(state.config)
         state.status, state.queues = "connected", adapter.list_queues()
     state = controller.current
     state.queues = sorted([replace(queue, depth=1000) if queue.name == "DEV.ORDERS" else queue for queue in state.queues]
@@ -67,7 +67,7 @@ def selector():
     controller, frame = base(1, "JMS selector")
     _, x, y, width, _ = next(region for region in frame.regions if region[0] == "messages")
     frame.text(x + 2, y + 1, "Selector: JMSPriority >= 7 AND region = 'EU'", "accent", width=width - 4)
-    footer(frame, "s edit selector  x clear selector  c consumers  r refresh  Tab/click panels  ↑↓ messages  Enter detail  q quit",
+    footer(frame, "s edit selector  x clear selector  c consumers  r refresh  ↑↓ messages  Enter detail  q quit",
            "3 messages loaded · browse limit 1000 · queue depth 1000 · selector filters JMS headers / properties")
     save_png(frame, OUTPUT / "feature-1-selector.png")
     controller.close()

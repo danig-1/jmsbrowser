@@ -6,7 +6,7 @@ query brokers, or change queues. Requires the optional Pillow dependency.
 from pathlib import Path
 
 from jmsbrowser.config import Config, ConnectionConfig
-from jmsbrowser.demo import DemoAdapter
+from tools.sample_data import SampleAdapter
 from jmsbrowser.domain import QueueInfo
 from jmsbrowser.screen import render
 from jmsbrowser.screenshot import save_png
@@ -24,7 +24,7 @@ CONSUMERS = [
 def base(option, title):
     config = Config((ConnectionConfig("Local Artemis", "artemis"), ConnectionConfig("Local IBM MQ", "ibm")))
     controller = Controller(config)
-    adapter = DemoAdapter(config.connections[0])
+    adapter = SampleAdapter(config.connections[0])
     state = controller.current
     state.status = "connected"
     state.queues = sorted([*adapter.list_queues(), QueueInfo("DEV.LOADTEST", 1000)], key=lambda q: q.name)

@@ -202,7 +202,7 @@ class JMSAdapter:
                     producer.close()
                 except Exception:
                     pass  # Closing a producer does not undo a completed send.
-        receipt = {"queue": queue_name, "size": len(draft.body.encode("utf-8")), "demo": False}
+        receipt = {"queue": queue_name, "size": len(draft.body.encode("utf-8"))}
         for key in ("JMSMessageID", "JMSTimestamp", "JMSExpiration"):
             try:
                 receipt[key] = java_value(getattr(message, "get" + key)())

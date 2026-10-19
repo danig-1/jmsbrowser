@@ -252,6 +252,12 @@ class Composer:
 
     def handle_mouse(self, frame, x, y, click, wheel, controller):
         self.sync()
+        action, _ = frame.action_at(x, y)
+        if click and action == "close_prompt" and self.prompt is not None:
+            self.prompt, self.prompt_kind, self.error = None, None, ""
+            return False
+        if click and action == "close_composer" and self.prompt is None:
+            return True
         if self.stage == "sending":
             return False
         try:

@@ -56,14 +56,6 @@ def test_full_message_copy_read_preserves_queue_depth_and_ids(index):
         assert client.request("browse", queue="DEV.ORDERS", limit=100, max_body_bytes=10) == first
 
 
-def test_offline_worker_does_not_require_java_or_credentials(monkeypatch):
-    from jmsbrowser.config import ConnectionConfig
-    monkeypatch.setenv("JAVA_HOME", "does-not-exist")
-    with WorkerClient(ConnectionConfig("Demo", "artemis"), demo=True) as client:
-        assert len(client.request("connect")) == 4
-        assert len(client.request("browse", queue="DEV.ORDERS", limit=100, max_body_bytes=262144)) == 3
-
-
 def test_artemis_loadtest_has_1000_persistent_messages_without_consuming():
     config = load_config(ROOT / "config.example.yaml")
     connection = replace(config.connections[0], timeout_seconds=30)

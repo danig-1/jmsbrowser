@@ -15,7 +15,7 @@ from jmsbrowser.brokers import JMSAdapter
 from jmsbrowser.client import BrokerError
 from jmsbrowser.composer import Composer, TextBuffer
 from jmsbrowser.config import Config, ConnectionConfig
-from jmsbrowser.demo import DemoAdapter
+from tools.sample_data import SampleAdapter
 from jmsbrowser.outgoing import OutgoingMessage, OutgoingProperty, SendFailure, destination, load_body, load_draft, save_draft
 from jmsbrowser.screen import render
 from jmsbrowser.state import Controller
@@ -91,9 +91,9 @@ def test_windows_utf16_input_preserves_emoji_in_composer(app):
 
 @pytest.fixture
 def app():
-    config = Config((ConnectionConfig("Demo", "artemis"),))
+    config = Config((ConnectionConfig("Test", "artemis"),))
     controller = Controller(config)
-    adapter = DemoAdapter(config.connections[0])
+    adapter = SampleAdapter(config.connections[0])
     state = controller.current
     state.status, state.queues = "connected", adapter.list_queues()
     state.queue_index = next(i for i, q in enumerate(state.queues) if q.name == "DEV.ORDERS")
@@ -102,6 +102,51 @@ def app():
     app = TerminalApp(controller)
     yield app
     controller.close()
+
+
+@pytest.mark.parametrize("stage", ["edit", "preview", "sending", "sent", "error"])
+@pytest.mark.parametrize("width,height", [(120, 28), (160, 46), (220, 60)])
+def test_composer_x_closes_in_every_stage_without_changing_pending_sends(app, monkeypatch, stage, width, height):
+    monkeypatch.setattr(app.controller, "send_message", lambda *args: pytest.fail("Closing must not send"))
+    app.handle_key("n")
+    app.handle_key("x")
+    app.handle_key("F2")
+    composer = app.view.composer
+    job = SimpleNamespace(status="sending" if stage == "sending" else "sent" if stage == "sent" else "error",
+                          outcome="unknown", error="", receipt={"size": 1, "JMSMessageID": "ID:sent"})
+    if stage != "edit":
+        composer.job = job
+    composer.stage = stage
+    if stage == "sending":
+        app.controller.send_job = job
+    original = (app.controller.pane, app.controller.current.queue_index, app.controller.current.message_index)
+    frame = app.last_frame = render(app.controller, width, height, app.view)
+    _, _, x, y, span = next(action for action in frame.actions if action[0] == "close_composer")
+    assert frame.plain_lines()[y][x:x + span] == " X " and x == width - 9
+    app.handle_mouse(x + 1, y, curses.BUTTON1_PRESSED)
+    assert app.view.composer is composer
+    app.handle_mouse(x + 1, y, curses.BUTTON1_CLICKED)
+    assert app.view.composer is None and app.running
+    assert (app.controller.pane, app.controller.current.queue_index, app.controller.current.message_index) == original
+    if stage == "sending":
+        assert app.controller.send_job is job and job.status == "sending"
+
+
+@pytest.mark.parametrize("key", ["F3", "F4", "F5"])
+def test_file_dialog_x_cancels_only_the_path_prompt_and_preserves_the_draft(app, key, monkeypatch):
+    app.handle_key("n")
+    app.handle_key("x")
+    composer = app.view.composer
+    app.handle_key(key)
+    original = composer.fields["body"].text
+    monkeypatch.setattr(composer, "finish_prompt", lambda: pytest.fail("Closing must not read or write files"))
+    frame = app.last_frame = render(app.controller, 160, 46, app.view)
+    assert not any(action[0] == "close_composer" for action in frame.actions)
+    _, _, x, y, span = next(action for action in frame.actions if action[0] == "close_prompt")
+    assert frame.plain_lines()[y][x:x + span] == " X "
+    app.handle_mouse(x + 1, y, curses.BUTTON1_CLICKED)
+    assert app.view.composer is composer and composer.prompt is None
+    assert composer.fields["body"].text == original and composer.stage == "edit"
 
 
 @pytest.mark.parametrize("width,height", [(120, 28), (160, 46), (220, 60)])
@@ -185,7 +230,7 @@ def test_preview_has_no_write_and_send_is_explicit_once_even_with_repeated_input
         app.handle_key(key)
     assert len(calls) == 1 and app.view.composer.stage == "sending"
     app.view.composer.job.status = "sent"
-    app.view.composer.job.receipt = {"JMSMessageID": "ID:new", "size": 1, "demo": True}
+    app.view.composer.job.receipt = {"JMSMessageID": "ID:new", "size": 1}
     app.handle_key("ENTER")
     assert app.view.composer is None and len(calls) == 1
 
@@ -258,7 +303,7 @@ def test_controller_send_snapshot_destination_and_background_refresh(monkeypatch
     config = Config((ConnectionConfig("Test", "artemis"),))
     controller = Controller(config)
     state = controller.current
-    adapter = DemoAdapter(config.connections[0])
+    adapter = SampleAdapter(config.connections[0])
     state.status, state.queues = "connected", adapter.list_queues()
     state.queue_index = next(i for i, q in enumerate(state.queues) if q.name == "DEV.ORDERS")
     state.executor = ThreadPoolExecutor(max_workers=1)
@@ -355,7 +400,7 @@ def test_worker_send_timeout_is_unknown_and_is_not_retried():
 
 def test_success_refreshes_depth_even_when_an_earlier_depth_result_was_pending(app):
     state = app.controller.current
-    adapter = DemoAdapter(state.config)
+    adapter = SampleAdapter(state.config)
     started, release = threading.Event(), threading.Event()
     state.executor = ThreadPoolExecutor(max_workers=1)
     class Client:

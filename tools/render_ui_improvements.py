@@ -4,7 +4,7 @@ import json
 from pathlib import Path
 
 from jmsbrowser.config import Config, ConnectionConfig
-from jmsbrowser.demo import DemoAdapter
+from tools.sample_data import SampleAdapter
 from jmsbrowser.domain import QueueInfo
 from jmsbrowser.screen import ViewOptions, render
 from jmsbrowser.screenshot import save_png
@@ -19,19 +19,18 @@ def main():
     controller = Controller(config)
     try:
         for state in controller.connections:
-            adapter = DemoAdapter(state.config)
+            adapter = SampleAdapter(state.config)
             state.status, state.queues = "connected", adapter.list_queues()
             state.queues += [QueueInfo("INT.PAYMENTS.RECONCILIATION.DLQ", 24)]
             state.queue_index = next(i for i, queue in enumerate(state.queues) if queue.name == "DEV.ORDERS")
         state = controller.current
-        state.messages = DemoAdapter(state.config).browse("DEV.ORDERS")
+        state.messages = SampleAdapter(state.config).browse("DEV.ORDERS")
         message = state.messages[0]
         payload = {"event": "order.created", "order_id": "ORD-1042", "total": 129.9, "currency": "EUR",
                    "note": ("Deliver to reception during office hours. Call the customer before arrival; "
                             "the entrance is on the north side of the building. ") * 2}
         body = json.dumps(payload)
         state.messages[0] = replace(message, body=body, size=len(body.encode()))
-        controller.demo = True
         controller.notice = "Offline example data · Drag dividers to resize; double-click a divider to reset."
         view = ViewOptions(panel_widths=(22, 44))
         controller.pane = 1

@@ -1,13 +1,13 @@
-"""Deterministic offline data for trying navigation without Java or brokers."""
+"""Sample broker fixture for tests and screenshot tools; not an application mode."""
 from __future__ import annotations
 
 import json
 import time
 import uuid
-from .domain import Consumer, ConsumerSnapshot, Message, QueueInfo
+from jmsbrowser.domain import Consumer, ConsumerSnapshot, Message, QueueInfo
 
 
-class DemoAdapter:
+class SampleAdapter:
     def __init__(self, config):
         self.config = config
         orders = [
@@ -36,7 +36,7 @@ class DemoAdapter:
 
     def send_message(self, queue_name, draft):
         values = draft.validate()
-        mid, now = "ID:demo-" + str(uuid.uuid4()), int(time.time() * 1000)
+        mid, now = "ID:sample-" + str(uuid.uuid4()), int(time.time() * 1000)
         headers = {"JMSMessageID": mid, "JMSTimestamp": now, "JMSExpiration": now + draft.ttl_ms if draft.ttl_ms else 0,
                    "JMSType": draft.jms_type or None, "JMSCorrelationID": draft.correlation_id or None,
                    "JMSPriority": draft.priority, "JMSDeliveryMode": 2 if draft.persistent else 1,
@@ -44,7 +44,7 @@ class DemoAdapter:
         size = len(draft.body.encode())
         self.sent[queue_name].append(Message(mid, "TextMessage", draft.priority, draft.body, size, headers,
                                             {name: value for name, _, value in values}))
-        return {key: headers[key] for key in ("JMSMessageID", "JMSTimestamp", "JMSExpiration")} | {"queue": queue_name, "size": size, "demo": True}
+        return {key: headers[key] for key in ("JMSMessageID", "JMSTimestamp", "JMSExpiration")} | {"queue": queue_name, "size": size}
 
     def consumers(self, queue_name):
         consumers = [] if queue_name != "DEV.ORDERS" else [
@@ -52,17 +52,18 @@ class DemoAdapter:
             Consumer("c-185", "orders-worker-2", "10.20.0.22:50418", "orders-app", "CORE", "", "conn-19", "session-5", "OK"),
             Consumer("c-203", "audit-service", "10.20.0.30:51102", "audit-app", "AMQP", "", "conn-20", "session-6", "OK"),
         ]
-        return ConsumerSnapshot(queue_name, consumers, note="Illustrative demo consumers; no broker connection.")
+        return ConsumerSnapshot(queue_name, consumers, note="Illustrative consumers; no broker connection.")
 
     def browse(self, queue_name, limit=100, max_body_bytes=262144):
         messages = []
         for index, payload in enumerate(self.payloads[queue_name][:limit]):
             body = json.dumps(payload, ensure_ascii=False)
             size = len(body.encode("utf-8"))
-            mid = f"ID:demo-{self.config.type}-{queue_name}-{index + 1:04}"
+            mid = f"ID:sample-{self.config.type}-{queue_name}-{index + 1:04}"
             messages.append(Message(mid, "TextMessage", 4, body.encode()[:max_body_bytes].decode(errors="ignore"), size,
-                                    {"JMSMessageID": mid, "JMSPriority": 4, "JMSDeliveryMode": 2, "JMSExpiration": 0},
-                                    {"source": "demo"}, max_body_bytes is not None and size > max_body_bytes))
+                                    {"JMSMessageID": mid, "JMSTimestamp": 1792401234567 + index * 1000,
+                                     "JMSPriority": 4, "JMSDeliveryMode": 2, "JMSExpiration": 0},
+                                    {"source": "sample"}, max_body_bytes is not None and size > max_body_bytes))
         for message in self.live_sent(queue_name)[:max(0, limit - len(messages))]:
             from dataclasses import replace
             preview = message.body.encode()[:max_body_bytes].decode(errors="ignore")

@@ -12,10 +12,10 @@ from jmsbrowser.ui import TerminalApp
 from jmsbrowser.screen import detail_identity
 
 
-def test_async_full_copy_reads_original_body_and_preserves_preview_and_depth(monkeypatch):
+def test_async_full_copy_reads_original_body_and_preserves_preview_and_depth(monkeypatch, sample_worker):
     copied = []
     monkeypatch.setattr("jmsbrowser.ui.copy_text", copied.append)
-    controller = Controller(Config((ConnectionConfig("Demo", "artemis"),), UIConfig(max_body_bytes=5)), demo=True)
+    controller = Controller(Config((ConnectionConfig("Test Artemis", "artemis", auto_connect=True),), UIConfig(max_body_bytes=5)))
     app = TerminalApp(controller)
     try:
         wait_until(controller, lambda: controller.current.status == "connected")
@@ -43,7 +43,7 @@ class FakeClient:
     pending = threading.Event()
     release = threading.Event()
 
-    def __init__(self, config, demo):
+    def __init__(self, config):
         self.events = queue.Queue()
         self.closed = False
         self.calls = []

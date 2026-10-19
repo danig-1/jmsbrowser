@@ -27,13 +27,9 @@ def main():
                 operation = request["op"]
                 if operation == "connect":
                     config = ConnectionConfig(**request["config"])
-                    if request.get("demo"):
-                        from .demo import DemoAdapter
-                        adapter = DemoAdapter(config)
-                    else:
-                        from .brokers import create_adapter
-                        adapter = create_adapter(config)
-                        adapter.on_error = lambda error: send({"event": "connection_error", "error": str(error)})
+                    from .brokers import create_adapter
+                    adapter = create_adapter(config)
+                    adapter.on_error = lambda error: send({"event": "connection_error", "error": str(error)})
                     adapter.connect()
                     result = [asdict(queue) for queue in adapter.list_queues()]
                     known_queues = {queue["name"] for queue in result}

@@ -17,8 +17,8 @@ class BrokerError(RuntimeError):
 
 
 class WorkerClient:
-    def __init__(self, config, demo=False):
-        self.config, self.demo = config, demo
+    def __init__(self, config):
+        self.config = config
         self.responses, self.events = queue.Queue(), queue.Queue()
         self.lock = threading.Lock()
         self.closed = False
@@ -48,7 +48,7 @@ class WorkerClient:
                 raise BrokerError("Connection is closed.", "not_sent" if operation == "send" else None)
             payload = {"op": operation, **kwargs}
             if operation == "connect":
-                payload.update(config=self.config.to_dict(), demo=self.demo)
+                payload.update(config=self.config.to_dict())
             try:
                 self.process.stdin.write(json.dumps(payload) + "\n")
                 self.process.stdin.flush()

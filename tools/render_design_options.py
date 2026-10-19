@@ -10,15 +10,15 @@ import re
 import textwrap
 
 from jmsbrowser.config import Config, ConnectionConfig
-from jmsbrowser.domain import Consumer, Message, QueueInfo, format_size
-from jmsbrowser.screen import Frame, ViewOptions, draw_detail, render, short_id, table_widths
+from jmsbrowser.domain import Consumer, Message, QueueInfo, format_message_datetime, format_size
+from jmsbrowser.screen import HEADERS, Frame, ViewOptions, draw_detail, render, short_id, table_widths
 from jmsbrowser.screenshot import save_png
 from jmsbrowser.state import Controller
 
 ROOT = Path(__file__).resolve().parents[1]
 OUTPUT = ROOT / "docs/designs"
 WIDTH, HEIGHT = 160, 46
-FOOTER = "Tab/click panels  ↑↓ select  Enter connect/depth/detail  n compose  c consumers  r refresh  h tabs  / filter  q quit"
+FOOTER = "↑↓ select  Enter connect/depth/detail  n compose  c consumers  r refresh  h tabs  / filter  q quit"
 
 
 def sample_messages():
@@ -77,10 +77,10 @@ def save(frame, name, result):
 
 def message_table(frame, state, x, width, balanced=False):
     frame.fill(x, 4, width, 17)
-    columns = [24, 6, 4, 7, width - 49] if balanced else table_widths(width)
+    columns = [24, 19, 7, width - 56] if balanced else table_widths(width)
     cursor = x
-    for index, (label, span) in enumerate(zip(("MessageId", "Type", "Prio", "Size", "Body"), columns)):
-        text = label.rjust(span) if balanced and index in (2, 3) else label
+    for index, (label, span) in enumerate(zip(HEADERS, columns)):
+        text = label.rjust(span) if balanced and index == 2 else label
         frame.text(cursor, 4, text, "muted", width=span)
         cursor += span + 2
     if balanced:
@@ -91,11 +91,11 @@ def message_table(frame, state, x, width, balanced=False):
         bg, role = ("selected", "accent") if active else ("bg", "text")
         frame.fill(x, row, width, bg=bg)
         values = (short_id(message.message_id, columns[0]),
-                  message.type.removesuffix("Message") if balanced else message.type,
-                  str(message.priority), format_size(message.size), " ".join(message.body.split()))
+                  format_message_datetime(message.headers.get("JMSTimestamp")),
+                  format_size(message.size), " ".join(message.body.split()))
         cursor = x
         for col, (value, span) in enumerate(zip(values, columns)):
-            value = value.rjust(span) if balanced and col in (2, 3) else value
+            value = value.rjust(span) if balanced and col == 2 else value
             frame.text(cursor, row, value, role, bg, span)
             cursor += span + 2
 

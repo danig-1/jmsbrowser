@@ -54,7 +54,7 @@ def preview_lines(composer):
     target, draft = composer.target, composer.prepared
     if composer.stage == "sent":
         receipt = composer.job.receipt
-        return ["Demo send completed (offline only)." if receipt.get("demo") else "Send completed.", "",
+        return ["Send completed.", "",
                 f"Server: {target['name']}", f"Queue: {target['queue']}",
                 "MessageId: " + str(receipt.get("JMSMessageID") or "unavailable"),
                 f"JMSTimestamp: {receipt.get('JMSTimestamp')}", f"JMSExpiration: {receipt.get('JMSExpiration')}",
@@ -81,6 +81,7 @@ def draw_composer(frame, composer):
              "sent": "Message sent", "error": "Send result"}[composer.stage]
     frame.fill(x, y, width, height)
     frame.box(x, y, width, height, title, True)
+    frame.close_button(x, y, width, "close_composer")
     frame.fill(frame.width - 15, 0, 15, bg="bar")
     frame.text(frame.width - 15, 0, "COMPOSER", "accent", "bar", 15)
     if composer.stage == "edit":
@@ -176,6 +177,8 @@ def draw_composer(frame, composer):
         py, ph = max(y + 2, y + height // 2 - 3), 7
         frame.fill(x + 2, py, width - 4, ph)
         frame.box(x + 2, py, width - 4, ph, labels[composer.prompt_kind], True)
+        frame.actions = []
+        frame.close_button(x + 2, py, width - 4, "close_prompt")
         frame.composer_hits = []
         frame.text(left + 1, py + 1, "Path (Ctrl+U clears)", "muted", width=inner - 2)
         editor(frame, composer, "path", composer.prompt, left + 1, py + 2, inner - 2)

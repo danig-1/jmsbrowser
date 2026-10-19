@@ -6,8 +6,8 @@ import pytest
 from wcwidth import wcswidth
 
 from jmsbrowser.config import Config, ConnectionConfig
-from jmsbrowser.demo import DemoAdapter
-from jmsbrowser.domain import Consumer, ConsumerSnapshot, Message, QueueInfo
+from tools.sample_data import SampleAdapter
+from jmsbrowser.domain import Consumer, ConsumerSnapshot, Message, QueueInfo, format_message_datetime
 from jmsbrowser.screen import HEADERS, ViewOptions, render, short_id
 from jmsbrowser.state import Controller
 from jmsbrowser.ui import TerminalApp
@@ -170,7 +170,7 @@ def test_copy_fetches_complete_metadata_when_a_binary_value_was_previewed(contro
 def controller():
     config = Config((ConnectionConfig("Artemis", "artemis"), ConnectionConfig("IBM", "ibm")))
     controller = Controller(config)
-    adapter = DemoAdapter(config.connections[0])
+    adapter = SampleAdapter(config.connections[0])
     state = controller.current
     state.status, state.queues = "connected", adapter.list_queues()
     state.queue_index = next(i for i, q in enumerate(state.queues) if q.name == "DEV.ORDERS")
@@ -373,11 +373,49 @@ def test_message_size_precedes_body_in_header_and_data(controller):
     frame = render(controller, 160, 46)
     lines = frame.plain_lines()
     header = next(line for line in lines if "MessageId" in line and "Size" in line)
-    expected = ("MessageId", "Type", "Prio", "Size", "Body")
+    expected = ("MessageId", "Datetime", "Size", "Body")
     positions = [header.index(name) for name in expected]
     assert positions == sorted(positions)
+    assert "Type" not in header and "Prio" not in header
     row = next(y for (name, y), index in frame.row_hits.items() if name == "messages" and index == 0)
     assert lines[row].index(" B") < lines[row].index('{"event"')
+
+
+@pytest.mark.parametrize("width,height", [(120, 28), (144, 42), (160, 46), (220, 60)])
+def test_message_datetime_uses_jms_timestamp_and_fits_its_column(controller, width, height):
+    from datetime import datetime, timezone
+    timestamp = 1792401234567
+    message = replace(controller.current.messages[0], headers={"JMSTimestamp": timestamp, "JMSExpiration": timestamp + 999999})
+    controller.current.messages[0] = message
+    frame = render(controller, width, height)
+    lines = frame.plain_lines()
+    heading = next(line for line in lines if "MessageId" in line and "Datetime" in line)
+    row = next(y for (name, y), index in frame.row_hits.items() if name == "messages" and index == 0)
+    expected = datetime.fromtimestamp(timestamp / 1000, timezone.utc).astimezone().isoformat(sep=" ", timespec="seconds")[:19]
+    col = heading.index("Datetime")
+    assert lines[row][col:col + 19] == expected
+    assert message.type not in lines[row] and str(timestamp) not in lines[row]
+    assert "Tab/click panels" not in lines[-1]
+
+
+@pytest.mark.parametrize("timestamp", [None, 0, "1792401234567", True, 10**100])
+def test_unavailable_message_datetimes_display_na(timestamp):
+    assert format_message_datetime(timestamp) == "n/a"
+
+
+@pytest.mark.parametrize("width,height", [(120, 28), (160, 46), (220, 60)])
+def test_message_detail_x_closes_without_changing_browser_selection(controller, width, height):
+    app = TerminalApp(controller)
+    app.handle_key("ENTER")
+    original = (controller.pane, controller.current.queue_index, controller.current.message_index, controller.detail_tab)
+    frame = app.last_frame = render(controller, width, height, app.view)
+    _, _, x, y, span = next(action for action in frame.actions if action[0] == "close_detail")
+    assert frame.plain_lines()[y][x:x + span] == " X " and x == width - 5
+    app.handle_mouse(x + 1, y, curses.BUTTON1_PRESSED)
+    assert app.view.fullscreen
+    app.handle_mouse(x + 1, y, curses.BUTTON1_CLICKED)
+    assert not app.view.fullscreen and app.running
+    assert (controller.pane, controller.current.queue_index, controller.current.message_index, controller.detail_tab) == original
 
 
 @pytest.mark.parametrize("fullscreen", [False, True])
@@ -485,6 +523,27 @@ def consumer_app(controller, monkeypatch):
         return True
     monkeypatch.setattr(controller, "refresh_consumers", refresh)
     return TerminalApp(controller), calls
+
+
+@pytest.mark.parametrize("detail", [False, True])
+@pytest.mark.parametrize("status", ["loading", "ready", "error"])
+def test_consumer_x_closes_the_whole_inspector_in_all_states(controller, consumer_app, detail, status):
+    app, calls = consumer_app
+    app.handle_key("c")
+    app.view.consumer_detail = detail
+    controller.current.consumer_status = status
+    original = (controller.pane, controller.current.queue_index, controller.current.message_index)
+    frame = app.last_frame = render(controller, 160, 46, app.view)
+    close = next(action for action in frame.actions if action[0] == "close_consumers" and action[3] == 5)
+    _, _, x, y, width = close
+    assert frame.plain_lines()[y][x:x + width] == " X "
+    assert not any(action[0] == "close_detail" for action in frame.actions)
+    app.handle_mouse(x + 1, y, curses.BUTTON1_PRESSED)
+    assert app.view.consumer_inspector
+    app.handle_mouse(x + 1, y, curses.BUTTON1_CLICKED)
+    assert not app.view.consumer_inspector and not app.view.consumer_detail
+    assert calls == ["consumers"] and app.running
+    assert (controller.pane, controller.current.queue_index, controller.current.message_index) == original
 
 
 @pytest.mark.parametrize("width,height", [(120, 28), (160, 46), (220, 60)])

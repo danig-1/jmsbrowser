@@ -349,8 +349,9 @@ class TerminalApp:
                 self.view.consumer_focus = 1
                 self.controller.refresh_consumers()
                 self.view.consumer_scroll = 0
-            elif click and action == "close_consumers":
+            elif buttons & (curses.BUTTON1_CLICKED | curses.BUTTON1_DOUBLE_CLICKED) and action == "close_consumers":
                 self.view.consumer_inspector = False
+                self.view.consumer_detail = False
             else:
                 name, index = self.last_frame.hit(x, y)
                 if name not in ("consumers", "consumer_detail"):
@@ -368,6 +369,10 @@ class TerminalApp:
             return
         if click:
             action, value = self.last_frame.action_at(x, y)
+            if action == "close_detail":
+                if buttons & (curses.BUTTON1_CLICKED | curses.BUTTON1_DOUBLE_CLICKED):
+                    self.view.fullscreen = False
+                return
             if action == "queue_sort":
                 self.controller.pane = 1
                 if buttons & (curses.BUTTON1_CLICKED | curses.BUTTON1_DOUBLE_CLICKED):

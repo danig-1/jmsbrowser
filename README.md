@@ -3,8 +3,10 @@
 Python curses queue browser for **IBM MQ** and **Apache Artemis**, implementing
 option 3's payload-reader layout. Browse messages without removing them from queues.
 Compose and explicitly send TextMessages to configured queues on either provider.
-The right panel shows **MessageId, Type, Prio, Size, Body** and a selected
+The right panel shows **MessageId, Datetime, Size, Body** and a selected
 message's body, headers and properties below the table.
+Datetime uses `JMSTimestamp` in local time as `YYYY-MM-DD HH:MM:SS`; a missing,
+unset or invalid timestamp displays `n/a`.
 
 ![Implemented adjustable panels, focus styling and body reader with offline sample data](docs/designs/body-wrap-implemented.png)
 
@@ -13,7 +15,7 @@ message's body, headers and properties below the table.
 Python 3.11+ is required. Real broker connections use JMS provider clients through
 JPype and require a JVM. `jdk4py` in `requirements.txt` supplies a private runtime
 inside the virtual environment; an existing Java 21+ installation with `JAVA_HOME`
-also works. Offline demo mode does not start Java or access a broker.
+also works.
 
 Windows PowerShell:
 
@@ -21,7 +23,7 @@ Windows PowerShell:
 python -m venv .venv
 .\.venv\Scripts\python.exe -m pip install -r requirements.txt
 .\.venv\Scripts\python.exe -m jmsbrowser --install-clients
-.\.venv\Scripts\python.exe run.py --demo
+.\.venv\Scripts\python.exe run.py
 ```
 
 Linux/macOS:
@@ -31,7 +33,7 @@ python3 -m venv .venv
 source .venv/bin/activate
 pip install -r requirements.txt
 python -m jmsbrowser --install-clients
-python run.py --demo
+python run.py
 ```
 
 `requirements.txt` explicitly lists the runtime packages, including the bundled
@@ -85,6 +87,10 @@ Select a server and press Enter to
 connect. Tab or a mouse click moves between the three panels. In expanded message
 detail, Tab / Shift+Tab cycles Headers, Properties and Body; these tabs are also
 clickable in both detail layouts. Headers is selected by default. The message
+composer, consumer inspector and expanded message details each have a clickable
+**X** in the top-right corner. The composer's file-path dialogs also have an X
+that returns to the composer. Closing a composer while sending leaves its
+submitted request running; it does not cancel or repeat that request. The message
 list and inline detail each occupy half of section 3's height (rounded to whole
 terminal rows). Minimum terminal
 size is 120 columns × 28 rows; 160 × 46 leaves more room for message contents.
@@ -244,7 +250,7 @@ If the worker times out or loses the connection during sending, delivery may be
 unknown: the result directs you to inspect the queue before sending again and
 offers saving the draft instead of an automatic resend. Provider failures before
 send dispatch keep the draft available for editing. The composer stays open while
-the request is pending. Demo mode simulates sends only in its offline worker.
+the request is pending.
 On restricted brokers, sending additionally requires put/send authority on the
 target queue; the local Compose accounts already have it.
 

@@ -122,3 +122,12 @@ class Message:
 
 def format_size(size: int | None) -> str:
     return "n/a" if size is None else f"{size:,} B"
+
+
+def format_message_datetime(timestamp):
+    if type(timestamp) is not int or timestamp == 0:
+        return "n/a"
+    try:
+        return datetime.fromtimestamp(timestamp / 1000, timezone.utc).astimezone().strftime("%Y-%m-%d %H:%M:%S")
+    except (OverflowError, OSError, ValueError):
+        return "n/a"
