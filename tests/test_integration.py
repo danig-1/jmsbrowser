@@ -100,6 +100,10 @@ def test_consumer_inquiry_detects_input_only_and_does_not_consume(index):
                 assert consumer["protocol"] == "CORE"
                 assert consumer["selector"] == "JMSCorrelationID = 'jmsbrowser-test-no-match'"
                 assert consumer["consumer_id"] and consumer["connection_id"] and consumer["session_id"]
+                assert consumer["consumer_count"] == 2  # input consumer + browser on the same session
+                assert consumer["producer_count"] == 1  # held producer never sends
+                assert consumer["creation_time"]
+                assert not snapshot["note"]
             else:
                 assert snapshot["unit"] == "input handles"
                 assert consumer["details"]["Channel"] == "DEV.APP.SVRCONN"

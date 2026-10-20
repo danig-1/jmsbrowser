@@ -62,7 +62,10 @@ producer handles close after sending. Other applications can change queue conten
 Artemis discovers queues and depths through authenticated Jolokia search/read.
 IBM uses PCF inquiries; temporary PCF reply queues are excluded from the UI.
 Artemis consumer queries exclude browse-only handles and enrich queue metadata
-with the broker's filtered consumer view when authorized. IBM consumer inquiries
+with the broker's filtered consumer view and matching session view when authorized.
+The consumer list shows session user and session consumer/producer counts,
+remote address and consumer creation time. The inspector uses only X to close.
+IBM consumer inquiries
 use queue handle status filtered to input handles; process/thread fields are
 shown without claiming a unique consumer ID or selector that MQ does not expose.
 The development app account has display and command-request/reply permissions

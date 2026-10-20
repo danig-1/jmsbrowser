@@ -284,25 +284,60 @@ class ArtemisAdapter(JMSAdapter):
         if not attached:
             return ConsumerSnapshot(queue_name)
         broker = str(jpype.JClass("javax.management.ObjectName")(mbean).getKeyProperty("broker"))
-        enriched, note = {}, ""
+        server_mbean = "org.apache.activemq.artemis:broker=" + broker
+        enriched, notes = {}, []
         try:
-            result = self.jolokia({"type": "exec", "mbean": "org.apache.activemq.artemis:broker=" + broker,
+            result = self.jolokia({"type": "exec", "mbean": server_mbean,
                                    "operation": "listConsumers(java.lang.String,int,int)",
                                    "arguments": [json.dumps({"field": "queue", "operation": "EQUALS", "value": queue_name}), -1, -1]})
             enriched = {str(item["id"]): item for item in json.loads(result["value"])["data"] if item.get("queue") == queue_name}
         except Exception as error:
-            note = f"Connection details unavailable: {error}"
+            notes.append(f"Connection details unavailable: {error}")
+        sessions = {}
+        connections = sorted({str(item["connectionID"]) for item in attached if item.get("connectionID") not in (None, "")})
+        if connections:
+            try:
+                # Fetch once per connection in one HTTP batch; a session can own
+                # several consumers, including consumers on other queues.
+                requests = [{"type": "exec", "mbean": server_mbean,
+                             "operation": "listSessions(java.lang.String,int,int)",
+                             "arguments": [json.dumps({"field": "connectionID", "operation": "EQUALS", "value": connection}), -1, -1]}
+                            for connection in connections]
+                responses = self.jolokia(requests)
+                for connection, response in zip(connections, responses):
+                    for session in json.loads(response["value"])["data"]:
+                        if session.get("id") is not None and str(session.get("connectionID")) == connection:
+                            sessions[(connection, str(session["id"]))] = session
+            except Exception as error:
+                notes.append(f"Session details unavailable: {error}")
+
+        def count(value):
+            if type(value) not in (str, int):
+                return None
+            try:
+                number = int(value)
+                return number if number >= 0 else None
+            except ValueError:
+                return None
+
         consumers = []
         for item in attached:
             identity = str(item.get("sequentialId", ""))
             extra = enriched.get(identity, {})
+            connection_id = str(item["connectionID"]) if item.get("connectionID") is not None else ""
+            session_id = str(item["sessionID"]) if item.get("sessionID") is not None else ""
+            session = sessions.get((connection_id, session_id), {})
             consumers.append(Consumer(consumer_id=identity or str(item.get("consumerID", "")),
                                       application=str(extra.get("clientID") or ""), remote_address=str(extra.get("remoteAddress") or ""),
-                                      user=str(extra.get("validatedUser") or extra.get("user") or ""), protocol=str(extra.get("protocol") or ""),
-                                      selector=extra.get("filter"), connection_id=str(item.get("connectionID") or ""),
-                                      session_id=str(item.get("sessionID") or ""), status=str(item.get("status") or ""),
-                                      details={"Session consumer ID": item.get("consumerID"), "Created": extra.get("creationTime", "n/a")}))
-        return ConsumerSnapshot(queue_name, sorted(consumers, key=lambda item: item.consumer_id), note=note)
+                                      user=str(session.get("user") or ""), protocol=str(extra.get("protocol") or ""),
+                                      selector=extra.get("filter"), connection_id=connection_id,
+                                      session_id=session_id, status=str(item.get("status") or ""),
+                                      details={"Session consumer ID": item.get("consumerID"),
+                                               "Session creation time": session.get("creationTime", "n/a"),
+                                               "Session validated user": session.get("validatedUser") or "n/a"},
+                                      consumer_count=count(session.get("consumerCount")), producer_count=count(session.get("producerCount")),
+                                      creation_time=extra.get("creationTime")))
+        return ConsumerSnapshot(queue_name, sorted(consumers, key=lambda item: item.consumer_id), note="; ".join(notes))
 
 
 class IBMAdapter(JMSAdapter):
@@ -386,7 +421,7 @@ class IBMAdapter(JMSAdapter):
         import jpype
         J = jpype.JClass
         C, F = J("com.ibm.mq.constants.CMQC"), J("com.ibm.mq.constants.CMQCFC")
-        note = "Input handles may share an application/process. Selectors and unique handle IDs are not exposed."
+        note = "Input handles may share an application/process. This inquiry does not expose JMS session counts or consumer creation time."
         if fnmatch.fnmatchcase(queue_name, self.config.reply_prefix):
             return ConsumerSnapshot(queue_name, unit="input handles", note="Internal PCF reply queue excluded.")
         agent = self.inquiry_agent()

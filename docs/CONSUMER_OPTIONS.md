@@ -3,7 +3,11 @@
 **Option 2 is implemented.** Use `c` to open it, press `c` again to
 refresh metadata, Enter for full details, and Escape to return. It works on empty
 queues and preserves the browser's selection. Tab cycles the list, refresh and
-close controls. Mouse selection, double-click details and scrolling are supported.
+X controls. The X is the only close button. Mouse selection, double-click details
+and scrolling are supported. The list columns are User, Consumer count,
+Producer count, Remote address and Creation time. Artemis user and counts come
+from the matching session; creation time belongs to the consumer. Session counts
+include all queues in that session. Unavailable fields show `n/a`.
 The queue panel's buttons have been removed; the bottom bar shows `c consumers`
 and `r refresh`. Inside the inspector, `r` has no action.
 

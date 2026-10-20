@@ -26,6 +26,9 @@ class Consumer:
     session_id: str = ""
     status: str = ""
     details: dict = field(default_factory=dict)
+    consumer_count: int | None = None
+    producer_count: int | None = None
+    creation_time: str | int | None = None
 
     @property
     def identity(self):
@@ -37,6 +40,9 @@ class Consumer:
                   "Remote endpoint": self.remote_address or "n/a", "User": self.user or "n/a",
                   "Protocol": self.protocol or "n/a", "Selector": "n/a" if self.selector is None else self.selector or "none",
                   "ConnectionId": self.connection_id or "n/a", "SessionId": self.session_id or "n/a",
+                  "Session consumer count": self.consumer_count if self.consumer_count is not None else "n/a",
+                  "Session producer count": self.producer_count if self.producer_count is not None else "n/a",
+                  "Creation time": self.creation_time or "n/a",
                   "Status": self.status or "n/a", **self.details}
         return metadata_rows(values)
 

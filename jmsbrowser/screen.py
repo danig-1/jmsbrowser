@@ -110,9 +110,9 @@ class Frame:
         self.fill(x, y, width, bg=bg)
         self.text(x, y, text, "accent" if selected and focused else "muted" if selected else role, bg, width)
 
-    def close_button(self, x, y, width, action):
+    def close_button(self, x, y, width, action, focused=False):
         left = x + width - 5
-        self.text(left, y, " X ", "accent", "bar", 3)
+        self.text(left, y, " X ", "accent", "selected" if focused else "bar", 3)
         self.actions.insert(0, (action, None, left, y, 3))
 
     def divider_at(self, x, y):
@@ -309,16 +309,14 @@ def draw_consumer_inspector(frame, controller, view):
     # The inspector is modal: underlying panel actions cannot receive clicks.
     frame.actions, frame.regions, frame.row_hits = [], [], {}
     frame.dividers = []
-    frame.close_button(x, y, width, "close_consumers")
-    for focus, label, action, left in ((1, " Refresh consumers ", "refresh_consumers", x + 3),
-                                       (2, " Close ", "close_consumers", x + width - 11)):
-        active = view.consumer_focus == focus
-        frame.text(left, y + 2, label, "accent", "selected" if active else "bg")
-        frame.actions.append((action, None, left, y + 2, len(label)))
+    frame.close_button(x, y, width, "close_consumers", focused=view.consumer_focus == 2)
+    label = " Refresh consumers "
+    frame.text(x + 3, y + 2, label, "accent", "selected" if view.consumer_focus == 1 else "bg")
+    frame.actions.append(("refresh_consumers", None, x + 3, y + 2, len(label)))
     status = ("Loading…" if state.consumer_status == "loading" else
               "Unavailable" if state.consumer_status == "error" else
               f"{len(consumers)} attached {unit}" if snapshot else "No consumer data")
-    frame.text(x + 3, y + 4, f"{state.config.name}  ·  {status}  ·  browser sessions hidden", "muted", width=width - 6)
+    frame.text(x + 3, y + 4, f"{state.config.name}  ·  {status}  ·  browser rows hidden", "muted", width=width - 6)
     selected = consumers[min(state.consumer_index, len(consumers) - 1)] if consumers else None
     if state.consumer_status == "error":
         for offset, line in enumerate(textwrap.wrap(safe_text(state.consumer_error), width - 6)[:height - 12]):
@@ -332,8 +330,9 @@ def draw_consumer_inspector(frame, controller, view):
         frame.regions.append(("consumer_detail", x + 2, y + 6, width - 4, height - 11))
     else:
         available = width - 6
-        columns = [16, max(19, (available - 50) // 2), available - 50 - max(19, (available - 50) // 2), 14, 12]
-        headings = ("PID / TID" if unit == "input handles" else "ConsumerId", "Application / Client", "Remote endpoint", "User", "Protocol")
+        user_width = min(24, max(12, available // 7))
+        columns = [user_width, 14, 14, available - user_width - 66, 30]
+        headings = ("User", "Consumer count", "Producer count", "Remote address", "Creation time")
         cursor = x + 3
         for label, col_width in zip(headings, columns):
             frame.text(cursor, y + 6, label, "muted", width=col_width)
@@ -346,8 +345,9 @@ def draw_consumer_inspector(frame, controller, view):
             item, row = consumers[index], y + 8 + offset
             active = index == state.consumer_index
             frame.row(x + 3, row, available, "", active)
-            identity = f"{item.details.get('ProcessId', 'n/a')} / {item.details.get('ThreadId', 'n/a')}" if unit == "input handles" else item.consumer_id
-            values = (identity, item.application, item.remote_address, item.user, item.protocol)
+            created = format_message_datetime(item.creation_time) if type(item.creation_time) is int else item.creation_time
+            values = (item.user, str(item.consumer_count) if item.consumer_count is not None else "n/a",
+                      str(item.producer_count) if item.producer_count is not None else "n/a", item.remote_address, created)
             cursor = x + 3
             for value, col_width in zip(values, columns):
                 frame.text(cursor, row, value or "n/a", "accent" if active else "text", "selected" if active else "bg", col_width)
@@ -361,7 +361,7 @@ def draw_consumer_inspector(frame, controller, view):
         frame.text(x + 3, y + height - 4, snapshot.note, "muted", width=width - 6)
     hint = "↑↓/PgUp/PgDn scroll  [ / ] values  Enter/Esc back to list" if view.consumer_detail else "↑↓ select  Enter: full consumer / connection / selector details"
     frame.text(x + 3, y + height - 3, hint, "accent", width=width - 6)
-    frame.text(x + 3, y + height - 2, "c: refresh consumers  Tab: list / refresh / close  Esc: close inspector", "muted", width=width - 6)
+    frame.text(x + 3, y + height - 2, "c: refresh consumers  Tab: list / refresh / X  Esc: close inspector", "muted", width=width - 6)
 
 
 def render(controller, width, height, view=None):

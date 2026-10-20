@@ -18,8 +18,9 @@ def main():
             # This connection is never started; the empty-queue selector is additional isolation.
             consumer = session.createConsumer(session.createQueue("DEV.EMPTY"), "JMSCorrelationID = 'jmsbrowser-test-no-match'")
             browser = session.createBrowser(session.createQueue("DEV.EMPTY"))
+            producer = session.createProducer(session.createQueue("DEV.EMPTY"))  # never sends
             enumeration = browser.getEnumeration()
-            resources.extend([consumer, browser])
+            resources.extend([consumer, browser, producer])
         else:
             import jpype
             C = jpype.JClass("com.ibm.mq.constants.CMQC")

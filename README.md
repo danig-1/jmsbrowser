@@ -155,8 +155,8 @@ requires `wl-clipboard` on Wayland or `xclip` / `xsel` on X11.
 | Inspector Up / Down, PgUp / PgDn | Select consumers; scroll when viewing consumer details |
 | Inspector Enter | Show full consumer, connection, session and selector details |
 | Inspector c / Refresh consumers | Refresh only consumer metadata; r has no action here |
-| Inspector Tab / Shift+Tab | Focus list, Refresh consumers or Close |
-| Inspector Escape / Close | Return from details to list, then close; Close closes immediately |
+| Inspector Tab / Shift+Tab | Focus list, Refresh consumers or X |
+| Inspector Escape / X | Return from details to list, then close; X closes immediately |
 | q / Ctrl+C | Quit, clear the curses screen and restore the terminal cursor |
 
 The green dot follows a live provider connection. Each connection has an isolated
@@ -180,6 +180,16 @@ labels retain fixed positions and widths; the active tab uses a background highl
 The queue panel has no Refresh or Consumers buttons; use the `r refresh` and
 `c consumers` shortcuts shown in the bottom bar. In the consumer inspector,
 press `c` again to refresh the consumer list.
+
+The consumer list shows **User, Consumer count, Producer count, Remote address,
+Creation time**. For Artemis, User and both counts come from the consumer's
+matching session. The counts cover the entire session, including consumers on
+other queues and browsers; consumers sharing a session repeat its counts. Creation time is
+the consumer's creation time, as reported by the broker. Full consumer, session
+and connection details remain available with Enter. Unavailable or unauthorized
+fields show `n/a`; the IBM MQ handle inquiry does not expose JMS session counts
+or consumer creation time. The inspector has one **X** close control, with no
+separate text Close button.
 
 Queues default to alphabetical name order, ascending. Click **Queue** or
 **Depth** to sort the middle panel; selecting a different column starts ascending,

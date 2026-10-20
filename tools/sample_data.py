@@ -48,9 +48,12 @@ class SampleAdapter:
 
     def consumers(self, queue_name):
         consumers = [] if queue_name != "DEV.ORDERS" else [
-            Consumer("c-184", "orders-worker-1", "10.20.0.21:50412", "orders-app", "CORE", "", "conn-18", "session-4", "OK"),
-            Consumer("c-185", "orders-worker-2", "10.20.0.22:50418", "orders-app", "CORE", "", "conn-19", "session-5", "OK"),
-            Consumer("c-203", "audit-service", "10.20.0.30:51102", "audit-app", "AMQP", "", "conn-20", "session-6", "OK"),
+            Consumer("c-184", "orders-worker-1", "10.20.0.21:50412", "orders-app", "CORE", "", "conn-18", "session-4", "OK",
+                     consumer_count=3, producer_count=0, creation_time="Tue Oct 20 09:00:00 UTC 2026"),
+            Consumer("c-185", "orders-worker-2", "10.20.0.22:50418", "orders-app", "CORE", "", "conn-19", "session-5", "OK",
+                     consumer_count=1, producer_count=2, creation_time="Tue Oct 20 09:01:00 UTC 2026"),
+            Consumer("c-203", "audit-service", "10.20.0.30:51102", "audit-app", "AMQP", "", "conn-20", "session-6", "OK",
+                     consumer_count=1, producer_count=0, creation_time="Tue Oct 20 09:02:00 UTC 2026"),
         ]
         return ConsumerSnapshot(queue_name, consumers, note="Illustrative consumers; no broker connection.")
 

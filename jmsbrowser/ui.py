@@ -227,6 +227,7 @@ class TerminalApp:
                 self.controller.refresh_consumers()
             elif view.consumer_focus == 2:
                 view.consumer_inspector = False
+                view.consumer_detail = False
             elif state.consumer_status == "ready" and state.consumer_snapshot and state.consumer_snapshot.consumers:
                 view.consumer_detail = not view.consumer_detail
                 view.consumer_scroll = view.consumer_horizontal = 0

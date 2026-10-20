@@ -516,13 +516,49 @@ def consumer_app(controller, monkeypatch):
         state = controller.current
         state.consumer_snapshot = ConsumerSnapshot(state.selected_queue.name, [
             Consumer("consumer-" + str(i), "orders-app-" + str(i), "127.0.0.1:5000", "app", "CORE", "color = 'red'", "conn-full-id", "session-full-id", "OK",
-                     {"Extra " + str(n): "value" for n in range(40)})
+                     {"Extra " + str(n): "value" for n in range(40)}, consumer_count=7, producer_count=0,
+                     creation_time="Tue Oct 20 10:00:00 UTC 2026")
             for i in range(30)
         ])
         state.consumer_status = "ready"
         return True
     monkeypatch.setattr(controller, "refresh_consumers", refresh)
     return TerminalApp(controller), calls
+
+
+@pytest.mark.parametrize("width,height", [(120, 28), (144, 42), (160, 46), (220, 60)])
+def test_consumer_columns_show_session_values_creation_time_and_only_one_close_control(controller, consumer_app, width, height):
+    app, _ = consumer_app
+    app.handle_key("c")
+    frame = app.last_frame = render(controller, width, height, app.view)
+    lines = frame.plain_lines()
+    titles = ("User", "Consumer count", "Producer count", "Remote address", "Creation time")
+    heading = next(line for line in lines if all(title in line for title in titles))
+    positions = [heading.index(title) for title in titles]
+    assert positions == sorted(positions)
+    row = next(row for (kind, row), index in frame.row_hits.items() if kind == "consumers" and index == 0)
+    assert lines[row][positions[0]:positions[0] + 3] == "app"
+    assert lines[row][positions[1]:positions[1] + 14].strip() == "7"
+    assert lines[row][positions[2]:positions[2] + 14].strip() == "0"
+    assert "127.0.0.1:5000" in lines[row]
+    assert "Tue Oct 20 10:00:00 UTC 2026" in lines[row]
+    assert "Close" not in "\n".join(lines)
+    close = [action for action in frame.actions if action[0] == "close_consumers"]
+    assert len(close) == 1 and lines[close[0][3]][close[0][2]:close[0][2] + close[0][4]] == " X "
+    assert all(wcswidth(line) == width for line in lines)
+    app.handle_key("TAB")
+    app.handle_key("TAB")
+    focused = render(controller, width, height, app.view)
+    assert focused.cells[close[0][3]][close[0][2]][2] == "selected"
+
+
+def test_consumer_unknown_session_fields_are_na_not_invented_zeroes(controller):
+    state = controller.current
+    state.consumer_snapshot = ConsumerSnapshot(state.selected_queue.name, [Consumer(remote_address="host:123")], "input handles")
+    state.consumer_status = "ready"
+    frame = render(controller, 160, 46, ViewOptions(consumer_inspector=True))
+    row = next(y for (kind, y), index in frame.row_hits.items() if kind == "consumers")
+    assert frame.plain_lines()[row].count("n/a") == 4
 
 
 @pytest.mark.parametrize("detail", [False, True])
