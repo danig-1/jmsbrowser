@@ -297,6 +297,8 @@ class Controller:
                     old = state.consumer_snapshot
                     selected = old.consumers[state.consumer_index] if old and state.consumer_index < len(old.consumers) else None
                     state.consumer_snapshot = ConsumerSnapshot.from_dict(value)
+                    state.queues = [replace(q, consumers=len(state.consumer_snapshot.consumers)) if q.name == value["queue"] else q
+                                    for q in state.queues]
                     state.consumer_index = next((i for i, item in enumerate(state.consumer_snapshot.consumers) if selected and item.identity == selected.identity), 0)
                     state.consumer_status = "ready"
                 continue
@@ -311,7 +313,8 @@ class Controller:
                 continue
             if operation == "queue_depth":
                 state.depth_pending.discard(value["name"])
-                state.queues = [replace(q, depth=int(value["depth"])) if q.name == value["name"] else q for q in state.queues]
+                state.queues = [replace(q, depth=int(value["depth"]), consumers=value.get("consumers", q.consumers))
+                                if q.name == value["name"] else q for q in state.queues]
                 self.notice = f"{value['name']}: depth refreshed ({value['depth']})."
             elif operation == "queue_depths":
                 state.all_depths_pending = False

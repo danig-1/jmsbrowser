@@ -17,15 +17,15 @@ HEADERS = ("MessageId", "Datetime", "Size", "Body")
 MIN_WIDTH, MIN_HEIGHT = 120, 28
 ASCII_MAP = str.maketrans({"┌": "+", "┐": "+", "└": "+", "┘": "+", "─": "-", "│": "|", "●": "*", "○": "o", "…": "~", "·": ".", "↑": "^", "↓": "v", "←": "<", "→": ">", "↔": "|"})
 
-MIN_PANEL_WIDTHS = (18, 24, 66)
+MIN_PANEL_WIDTHS = (18, 34, 66)
 
 
-def panel_widths(width, requested=None, depth_width=5):
+def panel_widths(width, requested=None, depth_width=5, consumers_width=11):
     """Clamp a session layout to the terminal, keeping all columns usable."""
-    left, middle = requested or (max(22, min(28, width // 6)), max(30, min(38, width // 5 + 4)))
+    left, middle = requested or (max(22, min(28, width // 6)), max(38, min(50, width // 5 + 12)))
     minimum_left, minimum_middle, minimum_right = MIN_PANEL_WIDTHS
-    # Keep room for Queue ↑, a column gap, and the panel margins.
-    minimum_middle = min(max(minimum_middle, depth_width + 12), width - minimum_left - minimum_right - 2)
+    # Keep each sortable header and both counters visible at normal depths.
+    minimum_middle = min(max(minimum_middle, depth_width + consumers_width + 13), width - minimum_left - minimum_right - 2)
     left = max(minimum_left, min(left, width - minimum_middle - minimum_right - 2))
     middle = max(minimum_middle, min(middle, width - left - minimum_right - 2))
     return left, middle
@@ -145,9 +145,12 @@ def filtered_indices(items, query, key):
 def queue_indices(queues, view):
     indices = filtered_indices(queues, view.filters[1], lambda q: q.name)
     indices.sort(key=lambda index: (queues[index].name.casefold(), queues[index].name))
-    if view.queue_sort == "depth":
-        # Keep equal-depth queues alphabetical in either direction.
-        indices.sort(key=lambda index: queues[index].depth, reverse=view.queue_sort_descending)
+    if view.queue_sort in ("depth", "consumers"):
+        # Stable sorting keeps ties alphabetical; unavailable values stay last.
+        known = [index for index in indices if getattr(queues[index], view.queue_sort) is not None]
+        missing = [index for index in indices if getattr(queues[index], view.queue_sort) is None]
+        known.sort(key=lambda index: getattr(queues[index], view.queue_sort), reverse=view.queue_sort_descending)
+        indices = known + missing
     elif view.queue_sort_descending:
         indices.reverse()
     return indices
@@ -382,10 +385,13 @@ def render(controller, width, height, view=None):
         draw_detail(frame, state, controller, view, 1, panel_y + 2, width - 2, panel_h - 4)
     else:
         queue_order = queue_indices(state.queues, view)
-        depth_width = max(5, max((len(str(state.queues[index].depth)) for index in queue_order), default=1))
-        left, middle = frame.panel_widths = panel_widths(width, view.panel_widths, depth_width)
+        depth_width = max(7, max((len(str(state.queues[index].depth)) for index in queue_order), default=1))
+        count_digits = max(3, max((len(str(state.queues[index].consumers)) if state.queues[index].consumers is not None else 3
+                                   for index in queue_order), default=1))
+        consumers_width = max(11, count_digits)
+        left, middle = frame.panel_widths = panel_widths(width, view.panel_widths, depth_width, consumers_width)
         right_x, right_w = left + middle + 2, width - left - middle - 2
-        for pane, x, w, title in ((0, 0, left, "1 Connections"), (1, left + 1, middle, "2 Queues"), (2, right_x, right_w, "3 Messages")):
+        for pane, x, w, title in ((0, 0, left, "Connections"), (1, left + 1, middle, "Queues"), (2, right_x, right_w, "Messages")):
             focused = controller.pane == pane
             frame.box(x, panel_y, w, panel_h, "")
             frame.fill(x + 1, panel_y, w - 2, bg="accent" if focused else "bar")
@@ -408,30 +414,54 @@ def render(controller, width, height, view=None):
             frame.text(4, y + 1, subtitle, "muted", width=left - 6)
             frame.row_hits[("connections", y)] = index
             frame.row_hits[("connections", y + 1)] = index
-        frame.text(2, panel_y + panel_h - 3, f"{sum(s.status == 'connected' for s in controller.connections)} connected", "muted", width=left - 4)
         qx = left + 3
-        depth_x = qx + middle - 4 - depth_width
-        queue_width = depth_x - qx - 1
+        queue_available = middle - 4
+        queue_width = queue_available - depth_width - consumers_width - 2
+        # Very large counters get extra rows when the terminal cannot fit a
+        # queue name and both numbers side by side. Never abbreviate a counter.
+        compact = queue_width < 7
+        split_stats = compact and depth_width + count_digits + 1 > queue_available
+        stride = 1 + (2 if split_stats else 1) if compact else 1
+        depth_x = qx if compact else qx + queue_width + 1
+        consumers_x = qx + queue_available - consumers_width
         if view.filters[1]:
             frame.text(qx, panel_y + 1, "/ " + view.filters[1], "accent", width=middle - 4)
-        for column, title, x in (("name", "Queue", qx), ("depth", "Depth", min(depth_x, qx + middle - 10))):
+        for column, title, x, span in (("name", "Queue", qx, 7), ("depth", "Depth", depth_x, 7),
+                                       ("consumers", "Consumers", consumers_x, 11)):
             active = view.queue_sort == column
             arrow = "↓" if view.queue_sort_descending else "↑"
             label = title + (" " + arrow if active else "")
-            frame.text(x, panel_y + 2, label, "accent" if active else "muted", width=7)
-            frame.actions.append(("queue_sort", column, x, panel_y + 2, 7))
+            header_y = panel_y + 2 + (1 if compact and column != "name" else 0)
+            frame.text(x, header_y, label, "accent" if active else "muted", width=span)
+            frame.actions.append(("queue_sort", column, x, header_y, span))
         indices = queue_order
-        visible, start = page(indices, state.queue_index, max(1, panel_h - 7))
+        visible, start = page(indices, state.queue_index, max(1, (panel_h - 7 - int(compact)) // stride))
         for offset, index in enumerate(visible):
-            item, y = state.queues[index], panel_y + 4 + offset
+            item, y = state.queues[index], panel_y + 4 + int(compact) + offset * stride
             selected = index == state.queue_index
             focused = controller.pane == 1
             bg = "selected" if selected and focused else "bar" if selected else "bg"
             role = "accent" if selected and focused else "muted" if selected else "text"
-            frame.row(qx, y, middle - 4, "", selected, focused=focused)
-            frame.text(qx, y, ("> " if selected and focused else "  ") + clipped(item.name, queue_width - 2), role, bg, queue_width)
-            depth = "..." if state.all_depths_pending or item.name in state.depth_pending else str(item.depth)
-            frame.text(depth_x, y, depth.rjust(depth_width), role, bg, depth_width)
+            for row in range(y, y + stride):
+                frame.row(qx, row, queue_available, "", selected, focused=focused)
+            name_width = queue_available if compact else queue_width
+            frame.text(qx, y, ("> " if selected and focused else "  ") + clipped(item.name, name_width - 2), role, bg, name_width)
+            pending = state.all_depths_pending or item.name in state.depth_pending
+            depth = "..." if pending else str(item.depth)
+            consumers = "..." if pending else str(item.consumers) if item.consumers is not None else "n/a"
+            if split_stats:
+                for row, label, value in ((y + 1, "Depth", depth), (y + 2, "Consumers", consumers)):
+                    frame.text(qx, row, label, "muted", bg)
+                    frame.text(qx + 10, row, value.rjust(queue_available - 10), role, bg, queue_available - 10)
+                    frame.row_hits[("queues", row)] = index
+            elif compact:
+                stats_depth_width = queue_available - count_digits - 1
+                frame.text(qx, y + 1, depth.rjust(stats_depth_width), role, bg, stats_depth_width)
+                frame.text(qx + stats_depth_width + 1, y + 1, consumers.rjust(count_digits), role, bg, count_digits)
+                frame.row_hits[("queues", y + 1)] = index
+            else:
+                frame.text(depth_x, y, depth.rjust(depth_width), role, bg, depth_width)
+                frame.text(consumers_x, y, consumers.rjust(consumers_width), role, bg, consumers_width)
             frame.row_hits[("queues", y)] = index
         frame.text(qx, panel_y + panel_h - 3, f"{len(indices)} queues", "muted", width=middle - 4)
         mx, available = right_x + 2, right_w - 4

@@ -107,16 +107,15 @@ def adjustable_panels():
     frame = Frame(WIDTH, HEIGHT)
     left, middle = 22, 44
     right, right_width = left + middle + 2, WIDTH - left - middle - 2
-    for x, span, title, active in ((0, left, "1 Connections", False),
-                                  (left + 1, middle, "2 Queues", False),
-                                  (right, right_width, "3 Messages", True)):
+    for x, span, title, active in ((0, left, "Connections", False),
+                                  (left + 1, middle, "Queues", False),
+                                  (right, right_width, "Messages", True)):
         frame.box(x, 2, span, 40, title, active)
     for index, item in enumerate(result.connections):
         row, selected = 6 + index * 3, index == 0
         frame.row(2, row, left - 4, f"{'>' if selected else ' '} ● {item.config.name}", selected)
         frame.text(4, row, "●", "green", "selected" if selected else "bg")
         frame.text(4, row + 1, f"{item.config.type.upper()} · {item.config.queue_manager or item.config.port}", "muted", width=left - 6)
-    frame.text(2, 39, "2 connected", "muted", width=left - 4)
     qx = left + 3
     frame.text(qx, 4, "Queue", "muted")
     frame.text(qx + middle - 9, 4, "Depth", "muted")
@@ -150,7 +149,7 @@ def clear_focus():
         frame.box(x, y, width, height, "", False)
         frame.line(x + 1, y, width - 2)
         active = name == "queues"
-        title = {"connections": "1 Connections", "queues": "2 Queues", "messages": "3 Messages"}[name]
+        title = {"connections": "Connections", "queues": "Queues", "messages": "Messages"}[name]
         frame.fill(x + 1, y, width - 2, bg="accent" if active else "bar")
         frame.text(x + 2, y, title, "bg" if active else "muted", "accent" if active else "bar", width - 4)
         if not active:

@@ -44,9 +44,9 @@ def artemis(monkeypatch):
         result = []
         for request in payload:
             assert request["type"] == "read"
-            assert request["attribute"] == ["MessageCount", "Temporary"]
+            assert request["attribute"] == ["MessageCount", "Temporary", "ConsumerCount"]
             _, depth, temporary = entries[request["mbean"]]
-            result.append({"value": {"MessageCount": depth, "Temporary": temporary}})
+            result.append({"value": {"MessageCount": depth, "Temporary": temporary, "ConsumerCount": 4}})
         return result
     monkeypatch.setattr(ArtemisAdapter, "jolokia", lambda self, payload: jolokia(payload))
     return entries, calls
@@ -66,6 +66,7 @@ def test_artemis_hides_temporary_queues_using_metadata_and_keeps_normal_uuid_nam
     assert [queue.name for queue in queues] == expected
     assert set(adapter.queue_mbeans) == set(expected)
     assert all(queue.routing == "ANYCAST" for queue in queues)
+    assert all(queue.consumers == 4 for queue in queues)
     assert len(calls) == 2  # Fetch flags together with depths in the existing batch.
     if PERMANENT_UUID in expected:
         assert next(queue.depth for queue in queues if queue.name == PERMANENT_UUID) == 7

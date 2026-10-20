@@ -24,7 +24,7 @@ def test_actual_application_browses_every_fixture_without_consuming(index):
         assert not any(name.startswith("DEV.JMSBROWSER.") for name in before)
         assert {name: before[name] for name in expected} == expected
         for name, count in expected.items():
-            assert client.request("queue_depth", queue=name) == {"name": name, "depth": count}
+            assert client.request("queue_depth", queue=name) == {"name": name, "depth": count, "consumers": 0}
             first = client.request("browse", queue=name, limit=100, max_body_bytes=262144)
             second = client.request("browse", queue=name, limit=100, max_body_bytes=262144)
             assert first == second and len(first) == count
@@ -94,6 +94,8 @@ def test_consumer_inquiry_detects_input_only_and_does_not_consume(index):
             consumer = snapshot["consumers"][0]
             assert consumer["user"] == ("artemis" if index == 0 else "app")
             assert consumer["remote_address"]
+            assert client.request("queue_depth", queue="DEV.EMPTY")["consumers"] == 1
+            assert next(q for q in client.request("queues") if q["name"] == "DEV.EMPTY")["consumers"] == 1
             if index == 0:
                 assert snapshot["unit"] == "consumers"
                 assert consumer["application"] == "jmsbrowser-integration-consumer"

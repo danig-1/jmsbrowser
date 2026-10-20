@@ -12,6 +12,7 @@ class QueueInfo:
     name: str
     depth: int
     routing: str = ""
+    consumers: int | None = None
 
 
 @dataclass(frozen=True)

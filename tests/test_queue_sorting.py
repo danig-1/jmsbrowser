@@ -16,7 +16,8 @@ def app(monkeypatch):
     controller = Controller(Config((ConnectionConfig("Test", "artemis"),)))
     state = controller.current
     state.status = "connected"
-    state.queues = [QueueInfo("Zulu", 2), QueueInfo("beta", 10), QueueInfo("Alpha", 2), QueueInfo("empty", 0)]
+    state.queues = [QueueInfo("Zulu", 2, consumers=2), QueueInfo("beta", 10, consumers=10),
+                    QueueInfo("Alpha", 2, consumers=2), QueueInfo("empty", 0, consumers=0)]
     state.queue_index = 1
     state.messages = [Message("ID:beta", "TextMessage", 4, "existing", 8)]
     state.messages_loaded = True
@@ -65,6 +66,71 @@ def test_depth_sort_is_numeric_and_ties_stay_alphabetical(app):
     assert not app.view.queue_sort_descending and not app.calls
 
 
+def test_consumer_sort_is_numeric_reversible_and_preserves_selection_without_queries(app):
+    state = app.controller.current
+    original = state.selected_queue, state.messages, state.message_index, state.generation
+    click_header(app, "consumers")
+    assert displayed(app) == ["empty", "Alpha", "Zulu", "beta"]
+    click_header(app, "consumers")
+    assert displayed(app) == ["beta", "Alpha", "Zulu", "empty"]
+    assert app.view.queue_sort == "consumers" and app.view.queue_sort_descending
+    assert (state.selected_queue, state.messages, state.message_index, state.generation) == original
+    assert not app.calls
+    click_header(app, "depth")
+    assert not app.view.queue_sort_descending
+
+
+def test_unknown_consumer_counts_sort_last_in_both_directions(app):
+    state = app.controller.current
+    state.queues = [replace(q, consumers=None) if q.name == "Zulu" else q for q in state.queues]
+    click_header(app, "consumers")
+    assert displayed(app) == ["empty", "Alpha", "beta", "Zulu"]
+    click_header(app, "consumers")
+    assert displayed(app) == ["beta", "Alpha", "empty", "Zulu"]
+
+
+def test_consumer_refresh_reorders_without_changing_selected_queue_or_messages(app):
+    state = app.controller.current
+    messages = state.messages
+    click_header(app, "consumers")
+    state.depth_jobs, state.all_depths_pending = 1, True
+    refreshed = [replace(q, consumers=20 if q.name == "empty" else 0) for q in state.queues]
+    app.controller.results.put((0, state.epoch, state.generation, "queue_depths", [asdict(q) for q in refreshed], None))
+    app.controller.poll()
+    assert displayed(app) == ["Alpha", "beta", "Zulu", "empty"]
+    assert state.selected_queue.name == "beta" and state.messages is messages
+    assert not app.calls
+
+
+@pytest.mark.parametrize("width,height", [(120, 28), (144, 42), (160, 46), (220, 60)])
+def test_plain_panel_titles_no_connection_summary_and_visible_consumer_values(app, width, height):
+    frame = render(app.controller, width, height, app.view)
+    for name, x, y, span, _ in frame.regions:
+        if name in ("connections", "queues", "messages"):
+            assert frame.plain_lines()[y][x + 2:x + span - 2].strip() == name.capitalize()
+    assert "1 connected" not in "\n".join(frame.plain_lines())
+    header = next(a for a in frame.actions if a[:2] == ("queue_sort", "consumers"))
+    assert "Consumers" in frame.plain_lines()[header[3]]
+    for (kind, y), index in frame.row_hits.items():
+        if kind == "queues":
+            assert frame.plain_lines()[y][header[2]:header[2] + 11].strip() == str(app.controller.current.queues[index].consumers)
+
+
+def test_both_extreme_counters_fit_narrow_queue_rows_and_remain_clickable(app):
+    state = app.controller.current
+    maximum = 9223372036854775807
+    state.queues = [QueueInfo("APP.HUGE", maximum, consumers=maximum), QueueInfo("APP.SMALL", 2, consumers=0)]
+    state.queue_index = 1
+    app.last_frame = render(app.controller, 120, 28, app.view)
+    hits = [(y, i) for (kind, y), i in app.last_frame.row_hits.items() if kind == "queues"]
+    huge_rows = [y for y, i in hits if i == 0]
+    assert len(huge_rows) == 3
+    assert sum(str(maximum) in app.last_frame.plain_lines()[y] for y in huge_rows) == 2
+    qx = next(region[1] + 2 for region in app.last_frame.regions if region[0] == "queues")
+    app.handle_mouse(qx, huge_rows[0], curses.BUTTON1_CLICKED)
+    assert state.selected_queue.name == "APP.HUGE" and not app.calls
+
+
 def test_navigation_and_mouse_selection_follow_sorted_filtered_rows_and_enter_targets_that_queue(app):
     click_header(app, "depth")
     app.view.filters[1] = "a"
@@ -110,13 +176,13 @@ def test_only_active_header_shows_sort_arrow_and_headers_fit_narrow_panels(app, 
     controller = app.controller
     controller.config = replace(controller.config, ui=replace(controller.config.ui, ascii=ascii))
     app.view.panel_widths = (18, 24)
-    for column, descending in (("name", False), ("name", True), ("depth", False), ("depth", True)):
+    for column, descending in (("name", False), ("name", True), ("depth", False), ("depth", True), ("consumers", False), ("consumers", True)):
         app.view.queue_sort, app.view.queue_sort_descending = column, descending
         frame = render(controller, width, height, app.view)
         _, queue_x, _, queue_width, _ = next(region for region in frame.regions if region[0] == "queues")
         for _, field, x, y, header_width in (action for action in frame.actions if action[0] == "queue_sort"):
             label = frame.plain_lines()[y][x:x + header_width].strip()
-            title = "Queue" if field == "name" else "Depth"
+            title = {"name": "Queue", "depth": "Depth", "consumers": "Consumers"}[field]
             arrow = ("v" if descending else "^") if ascii else ("↓" if descending else "↑")
             assert label == title + (" " + arrow if field == column else "")
             assert x >= queue_x + 1 and x + header_width <= queue_x + queue_width - 1

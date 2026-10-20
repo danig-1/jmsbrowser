@@ -3,7 +3,7 @@ from types import SimpleNamespace
 
 import pytest
 
-from jmsbrowser.brokers import IBMAdapter
+from jmsbrowser.brokers import ArtemisAdapter, IBMAdapter
 from jmsbrowser.config import ConnectionConfig
 
 
@@ -39,6 +39,30 @@ def test_ibm_depth_inquiries_reuse_connection_and_close_queue_handles(monkeypatc
     assert not created[0].connected
 
 
+def test_artemis_single_queue_stats_read_depth_and_consumers_together():
+    adapter = ArtemisAdapter(ConnectionConfig("Artemis", "artemis"))
+    adapter.queue_mbeans = {"A": "queue-A"}
+    calls = []
+    adapter.jolokia = lambda request: (calls.append(request), {"value": {"MessageCount": 42, "ConsumerCount": 0}})[1]
+    assert adapter.queue_stats("A") == {"name": "A", "depth": 42, "consumers": 0}
+    assert calls == [{"type": "read", "mbean": "queue-A", "attribute": ["MessageCount", "ConsumerCount"]}]
+
+
+def test_ibm_queue_stats_and_explicit_queue_list_use_input_handles_and_close_inquiries(monkeypatch):
+    closed, opened = [], []
+    constants = SimpleNamespace(MQOO_INQUIRE=32, MQOO_FAIL_IF_QUIESCING=8192)
+    monkeypatch.setitem(sys.modules, "jpype", SimpleNamespace(JClass=lambda name: constants))
+    def access(name, options):
+        opened.append((name, options))
+        return SimpleNamespace(getCurrentDepth=lambda: 42, getOpenInputCount=lambda: 3, close=lambda: closed.append(name))
+    adapter = IBMAdapter(ConnectionConfig("IBM", "ibm", queues=("A",)))
+    monkeypatch.setattr(adapter, "queue_manager_connection", lambda: SimpleNamespace(accessQueue=access))
+    assert adapter.queue_stats("A") == {"name": "A", "depth": 42, "consumers": 3}
+    queue = adapter.list_queues()[0]
+    assert (queue.depth, queue.consumers) == (42, 3)
+    assert closed == ["A", "A"] and opened == [("A", 8224), ("A", 8224)]
+
+
 @pytest.mark.parametrize("reason", [0, 2035, 2059], ids=["all-permitted", "mixed-permissions", "other-error"])
 def test_ibm_default_discovery_includes_non_dev_queues_and_handles_pcf_errors(monkeypatch, reason):
     parameters = {}
@@ -57,7 +81,7 @@ def test_ibm_default_discovery_includes_non_dev_queues_and_handles_pcf_errors(mo
     if reason:
         replies.insert(1, response(error=reason))
     constants = SimpleNamespace(MQCA_Q_NAME="name", MQIA_Q_TYPE="type", MQQT_LOCAL=1,
-                                MQIA_CURRENT_Q_DEPTH="depth", MQRC_NOT_AUTHORIZED=2035, MQCC_FAILED=2)
+                                MQIA_CURRENT_Q_DEPTH="depth", MQIA_OPEN_INPUT_COUNT="consumers", MQRC_NOT_AUTHORIZED=2035, MQCC_FAILED=2)
     formats = SimpleNamespace(MQCMD_INQUIRE_Q="inquire", MQIACF_Q_ATTRS="attrs")
     classes = {"com.ibm.mq.constants.CMQC": constants, "com.ibm.mq.constants.CMQCFC": formats,
                "com.ibm.mq.headers.pcf.PCFMessage": Request}

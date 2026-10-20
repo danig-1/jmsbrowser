@@ -11,10 +11,13 @@ The message list and inline detail split section 3 equally in height, excluding
 the shared separator and rounding to whole terminal rows. Both detail layouts
 default to Headers, with tab order Headers, Properties, Body.
 The Size label replaces Message size. In-app help and its ? shortcut have been removed.
+The queue table includes sortable consumer counts, refreshed together with depth.
+Artemis uses ConsumerCount; IBM MQ uses open-input handles. Panel titles have no
+number prefixes, and the connection-count summary is omitted.
 
-The r shortcut in the queue panel updates all queue depths. Enter refreshes
-only the selected queue's depth and retains queue focus; neither depth operation
-reloads messages. Lists use Up / Down, with no Left / Right navigation. Detail
+The r shortcut in the queue panel updates all queue depths and consumer counts.
+Enter refreshes the selected queue's statistics and loads its messages, retaining
+queue focus. Lists use Up / Down, with no Left / Right navigation. Detail
 tabs are clickable in both layouts, and Tab / Shift+Tab cycles them while a
 message is expanded. Queue routing labels and the breadcrumb row are omitted.
 Detail tabs use fixed labels and highlight backgrounds without changing their

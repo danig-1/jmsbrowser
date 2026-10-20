@@ -134,7 +134,7 @@ requires `wl-clipboard` on Wayland or `xclip` / `xsel` on X11.
 | Tab / Shift+Tab | Change panel focus; in expanded detail, cycle detail tabs |
 | Mouse click | Focus panels, select rows, activate detail tabs or inspector controls |
 | Click detail data | Copy the complete Body, Headers or Properties section and briefly flash it |
-| Click Queue / Depth header | Sort queues by name / numeric depth; click the same header again to reverse |
+| Click Queue / Depth / Consumers header | Sort queues by name / numeric depth / consumer count; click the same header again to reverse |
 | Mouse drag on a vertical divider | Resize the adjacent panels |
 | Double-click a divider / Escape during drag | Reset widths / cancel the drag |
 | Up / Down | Select connection, queue or message |
@@ -148,7 +148,7 @@ requires `wl-clipboard` on Wayland or `xclip` / `xsel` on X11.
 | h | Cycle Headers / Properties / Body |
 | /, Enter | Edit and apply a filter for the focused panel |
 | Escape | Return from full screen or clear focused filter |
-| r in queues | Refresh depths for all queues without reloading messages |
+| r in queues | Refresh depths and consumer counts for all queues without reloading messages |
 | r in connections/messages | Refresh queues and messages |
 | c | Open consumer inspector for the selected queue, including empty queues |
 | n | Open the TextMessage composer for the selected queue |
@@ -192,15 +192,22 @@ or consumer creation time. The inspector has one **X** close control, with no
 separate text Close button.
 
 Queues default to alphabetical name order, ascending. Click **Queue** or
-**Depth** to sort the middle panel; selecting a different column starts ascending,
+**Depth** or **Consumers** to sort the middle panel; selecting a different column starts ascending,
 and clicking the active column toggles descending/ascending. An up/down arrow
 marks the active column and direction (`^` / `v` in ASCII mode). Depth sorts
-numerically, with equal depths ordered by queue name. Sorting applies to the
+numerically, with equal depths ordered by queue name. Consumers also sorts
+numerically, keeps ties alphabetical and places unavailable values last in both
+directions. Sorting applies to the
 filtered list and stays active across refreshes and connection changes for the
 session. It preserves the selected queue and loaded messages without querying
 the broker; Up / Down follows the displayed order.
 Queue depths are displayed in full, with the depth column expanding for larger
 counts.
+The Consumers column uses Artemis queue consumer counts and IBM MQ open-input
+handle counts. It refreshes with Depth on Enter or `r`; these inquiries do not
+load or consume messages. Very large counters use extra rows in a narrow queue
+panel so every digit remains visible. Panel titles are Connections, Queues and
+Messages; the connections panel has no connected-count summary.
 
 Local refresh timing was checked before and after the latest changes. Windows
 tried IPv6 `::1` for `localhost` before falling back to the IPv4-only Compose port,

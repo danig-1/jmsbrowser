@@ -439,10 +439,10 @@ def test_selected_depth_loading_indicator_replaces_only_its_number(controller):
     state.depth_jobs = 1
     frame = render(controller, 144, 42)
     lines = frame.plain_lines()
-    depth_x = next(line.index("Depth") + 1 for line in lines if "Queue" in line and "Depth" in line)
+    depth_x = next(action[2] for action in frame.actions if action[:2] == ("queue_sort", "depth"))
     for (name, y), index in frame.row_hits.items():
         if name == "queues":
-            assert lines[y][depth_x:depth_x + 5].strip() == ("..." if index == state.queue_index else str(state.queues[index].depth))
+            assert lines[y][depth_x:depth_x + 7].strip() == ("..." if index == state.queue_index else str(state.queues[index].depth))
 
 
 @pytest.mark.parametrize("depth", [10000, 100000, 2147483647, 9223372036854775807])
@@ -454,16 +454,15 @@ def test_large_depths_show_every_digit_without_overlapping_names_or_borders(cont
     frame = render(controller, width, height, view)
     _, panel_x, _, panel_width, _ = next(region for region in frame.regions if region[0] == "queues")
     headers = [action for action in frame.actions if action[0] == "queue_sort"]
-    assert headers[0][2] + headers[0][4] < headers[1][2]
+    if headers[0][3] == headers[1][3]:
+        assert headers[0][2] + headers[0][4] < headers[1][2]
     assert headers[1][2] + headers[1][4] <= panel_x + panel_width - 1
-    for (kind, y), index in frame.row_hits.items():
-        if kind != "queues":
-            continue
-        row = frame.plain_lines()[y][panel_x + 1:panel_x + panel_width - 1]
-        expected = str(controller.current.queues[index].depth)
-        assert row.rstrip().endswith(expected)
-        assert "APP." in row[:row.rfind(expected)]
-        assert frame.plain_lines()[y][panel_x] == frame.plain_lines()[y][panel_x + panel_width - 1] == "│"
+    for index, queue in enumerate(controller.current.queues):
+        hit_rows = [y for (kind, y), item_index in frame.row_hits.items() if kind == "queues" and item_index == index]
+        rows = [frame.plain_lines()[y][panel_x + 1:panel_x + panel_width - 1] for y in hit_rows]
+        assert any(str(queue.depth) in row.split() for row in rows)
+        assert any("APP." in row for row in rows)
+        assert all(frame.plain_lines()[y][panel_x] == frame.plain_lines()[y][panel_x + panel_width - 1] == "│" for y in hit_rows)
     assert all(wcswidth(line) == width for line in frame.plain_lines())
 
 

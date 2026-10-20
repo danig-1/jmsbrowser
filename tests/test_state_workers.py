@@ -48,13 +48,14 @@ class FakeClient:
         self.closed = False
         self.calls = []
         self.depths = {"A": 1, "B": 1}
+        self.consumer_counts = {"A": 2, "B": 0}
 
     def request(self, operation, **options):
         self.calls.append((operation, options))
         if operation in ("connect", "queues"):
-            return [asdict(QueueInfo(name, depth)) for name, depth in self.depths.items()]
+            return [asdict(QueueInfo(name, depth, consumers=self.consumer_counts[name])) for name, depth in self.depths.items()]
         if operation == "queue_depth":
-            return {"name": options["queue"], "depth": self.depths[options["queue"]]}
+            return {"name": options["queue"], "depth": self.depths[options["queue"]], "consumers": self.consumer_counts[options["queue"]]}
         if operation == "consumers":
             return ConsumerSnapshot(options["queue"], [Consumer(consumer_id="c-" + options["queue"])]).to_dict()
         name = options["queue"]
@@ -78,6 +79,29 @@ def wait_until(controller, predicate):
             return
         time.sleep(0.005)
     raise AssertionError("Background operation did not complete")
+
+
+def test_queue_refreshes_update_consumer_counts_with_depths_without_loading_messages(monkeypatch):
+    monkeypatch.setattr("jmsbrowser.state.WorkerClient", FakeClient)
+    controller = Controller(Config((ConnectionConfig("Test", "artemis"),)))
+    try:
+        controller.connect()
+        wait_until(controller, lambda: controller.current.status == "connected")
+        state = controller.current
+        client = state.client
+        assert state.selected_queue.consumers == 2
+        client.consumer_counts.update(A=12, B=7)
+        controller.refresh_queue_depth()
+        wait_until(controller, lambda: not state.depth_jobs)
+        assert state.selected_queue.consumers == 12
+        assert next(q.consumers for q in state.queues if q.name == "B") == 0
+        controller.refresh_queue_depths()
+        wait_until(controller, lambda: not state.depth_jobs)
+        assert [q.consumers for q in state.queues] == [12, 7]
+        assert not state.messages_loaded and not state.messages
+        assert [call[0] for call in client.calls] == ["connect", "queue_depth", "queues"]
+    finally:
+        controller.close()
 
 
 def test_queue_selection_waits_for_enter_and_repeated_enter_coalesces_requests(monkeypatch):
@@ -319,6 +343,7 @@ def test_consumer_refresh_preserves_message_selection_and_only_queries_metadata(
         wait_until(controller, lambda: state.consumer_status == "ready")
         assert state.client.calls == [("consumers", {"queue": "A"})]
         assert state.consumer_snapshot.consumers[0].consumer_id == "c-A"
+        assert state.selected_queue.consumers == 1
         assert state.messages is messages and not state.busy
     finally:
         controller.close()

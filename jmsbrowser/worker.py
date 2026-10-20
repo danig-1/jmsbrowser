@@ -37,7 +37,7 @@ def main():
                     result = [asdict(queue) for queue in adapter.list_queues()]
                     known_queues = {queue["name"] for queue in result}
                 elif operation == "queue_depth":
-                    result = {"name": request["queue"], "depth": adapter.queue_depth(request["queue"])}
+                    result = adapter.queue_stats(request["queue"])
                 elif operation == "consumers":
                     result = adapter.consumers(request["queue"]).to_dict()
                 elif operation == "browse":

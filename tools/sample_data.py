@@ -25,10 +25,14 @@ class SampleAdapter:
         pass
 
     def list_queues(self):
-        return [QueueInfo(name, len(values) + len(self.live_sent(name)), "ANYCAST" if self.config.type == "artemis" else "LOCAL") for name, values in sorted(self.payloads.items())]
+        return [QueueInfo(name, len(values) + len(self.live_sent(name)), "ANYCAST" if self.config.type == "artemis" else "LOCAL",
+                          len(self.consumers(name).consumers)) for name, values in sorted(self.payloads.items())]
 
     def queue_depth(self, queue_name):
         return len(self.payloads[queue_name]) + len(self.live_sent(queue_name))
+
+    def queue_stats(self, queue_name):
+        return {"name": queue_name, "depth": self.queue_depth(queue_name), "consumers": len(self.consumers(queue_name).consumers)}
 
     def live_sent(self, queue_name):
         now = int(time.time() * 1000)

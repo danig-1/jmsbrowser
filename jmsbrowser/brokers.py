@@ -260,7 +260,7 @@ class ArtemisAdapter(JMSAdapter):
         self.queue_mbeans = {}
         if not queues:
             return []
-        metadata = self.jolokia([{"type": "read", "mbean": mbean, "attribute": ["MessageCount", "Temporary"]}
+        metadata = self.jolokia([{"type": "read", "mbean": mbean, "attribute": ["MessageCount", "Temporary", "ConsumerCount"]}
                                  for _, mbean, _ in queues])
         visible = []
         for (name, mbean, routing), response in zip(queues, metadata):
@@ -268,12 +268,17 @@ class ArtemisAdapter(JMSAdapter):
             if attributes["Temporary"]:
                 continue
             self.queue_mbeans[name] = mbean
-            visible.append(QueueInfo(name, int(attributes["MessageCount"]), routing))
+            visible.append(QueueInfo(name, int(attributes["MessageCount"]), routing, int(attributes["ConsumerCount"])))
         return sorted(visible, key=lambda q: q.name)
 
     def queue_depth(self, queue_name):
         mbean = self.queue_mbeans[queue_name]
         return int(self.jolokia({"type": "read", "mbean": mbean, "attribute": "MessageCount"})["value"])
+
+    def queue_stats(self, queue_name):
+        values = self.jolokia({"type": "read", "mbean": self.queue_mbeans[queue_name],
+                               "attribute": ["MessageCount", "ConsumerCount"]})["value"]
+        return {"name": queue_name, "depth": int(values["MessageCount"]), "consumers": int(values["ConsumerCount"])}
 
     def consumers(self, queue_name):
         import jpype
@@ -381,6 +386,15 @@ class IBMAdapter(JMSAdapter):
         finally:
             handle.close()
 
+    def queue_stats(self, queue_name):
+        import jpype
+        C = jpype.JClass("com.ibm.mq.constants.CMQC")
+        handle = self.queue_manager_connection().accessQueue(queue_name, C.MQOO_INQUIRE | C.MQOO_FAIL_IF_QUIESCING)
+        try:
+            return {"name": queue_name, "depth": int(handle.getCurrentDepth()), "consumers": int(handle.getOpenInputCount())}
+        finally:
+            handle.close()
+
     def list_queues(self):
         import jpype
         J = jpype.JClass
@@ -392,18 +406,15 @@ class IBMAdapter(JMSAdapter):
             for name in self.config.queues:
                 if not fnmatch.fnmatchcase(name, self.config.queue_pattern):
                     continue
-                handle = manager.accessQueue(name, C.MQOO_INQUIRE | C.MQOO_FAIL_IF_QUIESCING)
-                try:
-                    queues.append(QueueInfo(name, int(handle.getCurrentDepth()), "LOCAL"))
-                finally:
-                    handle.close()
+                values = self.queue_stats(name)
+                queues.append(QueueInfo(name, values["depth"], "LOCAL", values["consumers"]))
             return sorted(queues, key=lambda q: q.name)
         agent = self.inquiry_agent()
         reply_name = str(agent.getReplyQueueName()).strip()
         request = J("com.ibm.mq.headers.pcf.PCFMessage")(F.MQCMD_INQUIRE_Q)
         request.addParameter(C.MQCA_Q_NAME, self.config.queue_pattern)
         request.addParameter(C.MQIA_Q_TYPE, C.MQQT_LOCAL)
-        request.addParameter(F.MQIACF_Q_ATTRS, jpype.JArray(jpype.JInt)([C.MQCA_Q_NAME, C.MQIA_CURRENT_Q_DEPTH]))
+        request.addParameter(F.MQIACF_Q_ATTRS, jpype.JArray(jpype.JInt)([C.MQCA_Q_NAME, C.MQIA_CURRENT_Q_DEPTH, C.MQIA_OPEN_INPUT_COUNT]))
         queues = []
         for response in agent.send(request):
             # Wildcard inquiries can mix queue data with per-object permission errors.
@@ -414,7 +425,8 @@ class IBMAdapter(JMSAdapter):
                 raise RuntimeError(f"IBM queue discovery failed (reason {reason}).")
             name = str(response.getStringParameterValue(C.MQCA_Q_NAME)).strip()
             if name != reply_name and not fnmatch.fnmatchcase(name, self.config.reply_prefix) and fnmatch.fnmatchcase(name, self.config.queue_pattern):
-                queues.append(QueueInfo(name, int(response.getIntParameterValue(C.MQIA_CURRENT_Q_DEPTH)), "LOCAL"))
+                queues.append(QueueInfo(name, int(response.getIntParameterValue(C.MQIA_CURRENT_Q_DEPTH)), "LOCAL",
+                                        int(response.getIntParameterValue(C.MQIA_OPEN_INPUT_COUNT))))
         return sorted(queues, key=lambda q: q.name)
 
     def consumers(self, queue_name):
