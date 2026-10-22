@@ -93,6 +93,10 @@ class Message:
     truncated: bool = False
     size_note: str = "Payload bytes; text measured as UTF-8. Excludes headers."
 
+    @property
+    def selection_key(self):
+        return self.message_id or f"@{id(self)}"
+
     def to_dict(self):
         return asdict(self)
 

@@ -17,6 +17,13 @@ def navigation_key(key):
             curses.KEY_RESIZE: "RESIZE", curses.KEY_MOUSE: "MOUSE", "\t": "TAB", "\n": "ENTER", "\r": "ENTER",
             curses.KEY_DC: "DELETE", curses.KEY_F2: "F2", curses.KEY_F3: "F3", curses.KEY_F4: "F4", curses.KEY_F5: "F5", curses.KEY_F6: "F6",
             "\x1b": "ESC", "\x7f": "BACKSPACE", "\b": "BACKSPACE", "\x03": "QUIT"}
+    for name in ("KEY_SDOWN", "KEY_SF"):
+        if hasattr(curses, name):
+            keys[getattr(curses, name)] = "SHIFT_DOWN"
+    for name in ("KEY_SUP", "KEY_SR"):
+        if hasattr(curses, name):
+            keys[getattr(curses, name)] = "SHIFT_UP"
+    keys[curses.KEY_F15] = "SHIFT_F3"
     return keys.get(key, key)
 
 
@@ -29,6 +36,147 @@ class TerminalApp:
         self.pending_high_surrogate = None
         self.drag_start = None
         self.pending_copy = None
+        self.pending_search = None
+        self.selection_range = None
+
+    def clear_search(self):
+        if self.pending_search:
+            self.pending_search[1].cancel()
+            self.pending_search = None
+        self.view.search = None
+
+    def sync_search(self):
+        identity = detail_identity(self.controller)
+        if self.view.search and (identity is None or self.controller.pane != 2 or self.view.search.owner != identity[:-1]):
+            self.clear_search()
+
+    def start_search(self):
+        from .message_export import needs_full_message
+        from .message_search import MessageSearch
+        message = self.controller.current.selected_message
+        if self.controller.pane != 2 or message is None:
+            return
+        if not self.view.fullscreen and self.controller.current.message_index not in self.visible()[0]:
+            return
+        if self.pending_copy:
+            self.pending_copy[1].cancel()
+            self.pending_copy = None
+        self.view.copy_until = self.view.copy_flash_until = 0
+        self.sync_search()
+        search = self.view.search
+        if search and not search.error:
+            search.editing = True
+            search.buffer.text, search.buffer.cursor = search.query, len(search.query)
+            return
+        search = self.view.search = MessageSearch(detail_identity(self.controller)[:-1], message)
+        if needs_full_message(message):
+            try:
+                future = self.controller.full_message(message)
+            except Exception as error:
+                search.error = str(error)
+            else:
+                search.pending = True
+                self.pending_search = search, future
+
+    def poll_search(self):
+        from .message_export import needs_full_message
+        self.sync_search()
+        if not self.pending_search:
+            return
+        search, future = self.pending_search
+        if not future.done():
+            return
+        self.pending_search = None
+        search.pending = False
+        try:
+            message = future.result()
+            if needs_full_message(message):
+                raise ValueError("The full content could not be read.")
+        except Exception as error:
+            search.error = str(error)
+            return
+        state = self.controller.current
+        state.messages[state.message_index] = search.message = message
+        search.owner = detail_identity(self.controller)[:-1]
+        if not search.editing:
+            search.find(search.query)
+            self.jump_search(search.step(tab=self.controller.detail_tab))
+
+    def jump_search(self, match):
+        if match is None:
+            return
+        c, view = self.controller, self.view
+        c.detail_tab, view.horizontal_scroll = match.tab, 0
+        detail = next((region for region in self.last_frame.regions if region[0] == "detail"), None) if self.last_frame else None
+        width = detail[3] if detail else 70
+        row = match.line
+        if match.tab == 0:
+            message = c.current.selected_message
+            wrap = view.fullscreen or view.body_wrap
+            layout = body_layout(message.body, message.type, message.truncated, width - 8, wrap)
+            row = next((i for i, line in enumerate(layout.rows)
+                        if line.number == match.line + 1 and line.offset <= match.start < line.offset + len(line.text)), 0)
+            if not wrap:
+                from wcwidth import wcswidth
+                line = layout.rows[row]
+                view.horizontal_scroll = max(0, wcswidth(line.text[:match.start]) - max(1, (width - 8) // 4))
+        elif match.field == "value":
+            view.horizontal_scroll = max(0, match.start - max(1, width // 6))
+        rows = self.last_frame.detail_height if self.last_frame else 8
+        c.detail_scroll = max(0, row - max(0, rows // 3))
+
+    def search_key(self, key):
+        search = self.view.search
+        if key == "ESC":
+            self.clear_search()
+        elif key == "ENTER":
+            if not search.buffer.text:
+                self.clear_search()
+                return
+            search.query = search.buffer.text
+            search.editing = False
+            if not search.pending and not search.error:
+                search.find(search.query)
+                self.jump_search(search.step(tab=self.controller.detail_tab))
+        else:
+            search.buffer.edit(key)
+
+    def toggle_message(self):
+        state = self.controller.current
+        message = state.selected_message
+        if message is None or state.message_index not in self.visible()[0]:
+            return
+        key = message.selection_key
+        if key in state.marked_messages:
+            state.marked_messages.remove(key)
+        else:
+            state.marked_messages.add(key)
+        self.move(1)
+
+    def mark_range(self, step):
+        c, state = self.controller, self.controller.current
+        indices, selected = self.visible()
+        if c.pane != 2 or selected not in indices:
+            return
+        position = indices.index(selected)
+        context = (c.connection_index, state.epoch, state.selected_queue.name if state.selected_queue else None,
+                   tuple(state.messages[i].selection_key for i in indices))
+        if self.selection_range is None or self.selection_range[0] != context:
+            self.selection_range = context, position, set(state.marked_messages)
+        _, anchor, original = self.selection_range
+        position = max(0, min(len(indices) - 1, position + step))
+        state.marked_messages = original | {state.messages[indices[i]].selection_key
+                                           for i in range(min(anchor, position), max(anchor, position) + 1)}
+        c.select_message(indices[position])
+        self.view.horizontal_scroll = 0
+        self.sync_search()
+
+    def open_export(self):
+        from .message_export import MessageExport
+        state = self.controller.current
+        if self.controller.pane == 2 and state.export_selection and state.selected_queue:
+            owner = (self.controller.connection_index, state.epoch, state.selected_queue.name)
+            self.view.export_dialog = MessageExport(state.export_selection, state.config.name, state.selected_queue.name, owner)
 
     def copy_feedback(self, identity, text, error=False, pending=False):
         view, now = self.view, time.monotonic()
@@ -72,7 +220,8 @@ class TerminalApp:
             return
         identity, future = self.pending_copy
         if (identity != detail_identity(self.controller) or self.view.consumer_inspector
-                or self.view.composer is not None or self.view.prompt is not None or not self.running):
+                or self.view.composer is not None or self.view.export_dialog is not None
+                or self.view.prompt is not None or not self.running):
             future.cancel()
             self.pending_copy = None
             self.view.copy_until = self.view.copy_flash_until = 0
@@ -100,6 +249,8 @@ class TerminalApp:
         controller = self.controller
         (controller.select_connection, controller.select_queue, controller.select_message)[controller.pane](index)
         self.view.horizontal_scroll = 0
+        self.selection_range = None
+        self.sync_search()
 
     def move(self, step=0, end=None):
         indices, selected = self.visible()
@@ -181,6 +332,7 @@ class TerminalApp:
 
     def open_consumers(self):
         if self.controller.refresh_consumers():
+            self.clear_search()
             self.view.consumer_inspector = True
             self.view.consumer_detail = False
             self.view.consumer_focus = self.view.consumer_scroll = self.view.consumer_horizontal = 0
@@ -192,6 +344,7 @@ class TerminalApp:
             return
         from .composer import Composer
         from .outgoing import destination
+        self.clear_search()
         self.view.composer = Composer(destination(state.config, state.selected_queue.name), self.controller.connection_index, state.epoch)
 
     def move_consumer(self, step=0, end=None):
@@ -258,13 +411,39 @@ class TerminalApp:
         self.pending_high_surrogate = None
         key = navigation_key(key)
         c, view = self.controller, self.view
+        self.sync_search()
+        if key == "QUIT":
+            self.running = False
+            return
         if view.drag_divider is not None:
             self.stop_drag(restore=key == "ESC")
             if key == "ESC":
                 return
         if view.composer is not None:
+            if key in ("COMPOSER_EDIT", "COMPOSER_SEND", "COMPOSER_NEW"):
+                action = {"COMPOSER_EDIT": "edit", "COMPOSER_SEND": "send", "COMPOSER_NEW": "new"}[key]
+                if action == "send" and view.composer.stage != "preview":
+                    return
+                try:
+                    view.composer.activate(action, c)
+                except (ValueError, OSError) as error:
+                    view.composer.error = str(error)
+                return
+            if key == "q" and view.composer.stage != "edit" and view.composer.prompt is None:
+                self.running = False
+                return
             if view.composer.handle_key(key, c):
                 view.composer = None
+            return
+        if view.export_dialog is not None:
+            view.export_dialog.sync()
+            if key == "q" and (view.export_dialog.result or view.export_dialog.working):
+                self.running = False
+                return
+            if key == "EXPORT":
+                view.export_dialog.start(c)
+            elif view.export_dialog.key(key, c):
+                view.export_dialog = None
             return
         if view.prompt is not None:
             if key == "ESC":
@@ -283,6 +462,9 @@ class TerminalApp:
         if view.consumer_inspector:
             self.consumer_key(key)
             return
+        if view.search and view.search.editing:
+            self.search_key(key)
+            return
         if key in ("q", "QUIT"):
             self.running = False
         elif key in ("TAB", "BACKTAB"):
@@ -296,16 +478,29 @@ class TerminalApp:
                 self.scroll_detail(1 if key == "DOWN" else -1)
             else:
                 self.move(1 if key == "DOWN" else -1)
+        elif key in ("SHIFT_DOWN", "SHIFT_UP") and c.pane == 2 and not view.fullscreen:
+            self.mark_range(1 if key == "SHIFT_DOWN" else -1)
+        elif key == " " and c.pane == 2 and not view.fullscreen:
+            self.toggle_message()
+        elif key == "e" and c.pane == 2 and not view.fullscreen:
+            self.open_export()
+        elif key == "\x06":
+            self.start_search()
+        elif key in ("F3", "SHIFT_F3") and view.search:
+            self.jump_search(view.search.step(-1 if key == "SHIFT_F3" else 1))
         elif key in ("HOME", "END"):
-            indices, _ = self.visible()
-            self.move(end=0 if key == "HOME" else len(indices) - 1)
+            if view.fullscreen:
+                self.scroll_detail(-10**9 if key == "HOME" else 10**9)
+            else:
+                indices, _ = self.visible()
+                self.move(end=0 if key == "HOME" else len(indices) - 1)
         elif key == "ENTER":
             if c.pane == 0:
                 c.connect()
             elif c.pane == 1:
                 c.refresh_queue_depth()
                 c.browse_queue()
-            elif c.current.selected_message:
+            elif c.current.selected_message and (view.fullscreen or c.current.message_index in self.visible()[0]):
                 view.fullscreen = not view.fullscreen
         elif key == "d":
             c.disconnect()
@@ -322,8 +517,13 @@ class TerminalApp:
         elif key == "/":
             view.prompt = view.filters[c.pane]
         elif key == "ESC":
-            if view.fullscreen:
+            if view.search:
+                self.clear_search()
+            elif view.fullscreen:
                 view.fullscreen = False
+            elif c.pane == 2 and not view.filters[c.pane] and c.current.marked_messages:
+                c.current.marked_messages.clear()
+                self.selection_range = None
             else:
                 view.filters[c.pane] = ""
         elif key in ("PGUP", "PGDOWN"):
@@ -334,9 +534,30 @@ class TerminalApp:
                 view.horizontal_scroll = max(0, view.horizontal_scroll + (-8 if key == "[" else 8))
 
     def handle_mouse(self, x, y, buttons):
-        if self.last_frame is None or self.view.prompt is not None:
+        if self.last_frame is None:
+            return
+        action, value = self.last_frame.action_at(x, y)
+        completed_click = buttons & (curses.BUTTON1_CLICKED | curses.BUTTON1_DOUBLE_CLICKED)
+        if action == "footer_key":
+            if completed_click:
+                self.handle_key(value)
+            return
+        if self.view.prompt is not None:
             return
         click = buttons & (curses.BUTTON1_CLICKED | curses.BUTTON1_PRESSED | curses.BUTTON1_DOUBLE_CLICKED)
+        if self.view.export_dialog is not None:
+            dialog = self.view.export_dialog
+            dialog.sync()
+            if completed_click and not dialog.working:
+                if action == "close_export":
+                    self.view.export_dialog = None
+                elif action == "export_start":
+                    dialog.start(self.controller)
+                elif action == "export_path":
+                    hit = next(hit for hit in self.last_frame.actions if hit[0] == "export_path")
+                    dialog.focus = 0
+                    dialog.path.place(0, dialog.path.scroll_col + x - hit[2])
+            return
         if self.view.composer is not None:
             wheel = -3 if buttons & getattr(curses, "BUTTON4_PRESSED", 0) else 3 if buttons & getattr(curses, "BUTTON5_PRESSED", 0) else 0
             # Actions fire once per completed click, including the explicit Send button.
@@ -373,6 +594,7 @@ class TerminalApp:
             if action == "close_detail":
                 if buttons & (curses.BUTTON1_CLICKED | curses.BUTTON1_DOUBLE_CLICKED):
                     self.view.fullscreen = False
+                    self.clear_search()
                 return
             if action == "queue_sort":
                 self.controller.pane = 1
@@ -407,12 +629,18 @@ class TerminalApp:
             if name == "detail":
                 self.scroll_detail(-3)
             else:
-                self.move(-1)
+                if name == "messages" and buttons & getattr(curses, "BUTTON_SHIFT", 0):
+                    self.mark_range(-1)
+                else:
+                    self.move(-1)
         elif buttons & getattr(curses, "BUTTON5_PRESSED", 0):
             if name == "detail":
                 self.scroll_detail(3)
             else:
-                self.move(1)
+                if name == "messages" and buttons & getattr(curses, "BUTTON_SHIFT", 0):
+                    self.mark_range(1)
+                else:
+                    self.move(1)
         elif click:
             if index is not None:
                 self.select(index)
@@ -434,9 +662,12 @@ class TerminalApp:
         while self.running:
             self.controller.poll()
             self.poll_copy()
+            self.poll_search()
             refresh = self.controller.config.ui.refresh_seconds
             if refresh and time.monotonic() >= next_refresh:
-                if self.controller.current.status == "connected" and not self.controller.current.busy and not self.view.consumer_inspector and self.view.composer is None:
+                if (self.controller.current.status == "connected" and not self.controller.current.busy
+                        and not self.view.consumer_inspector and self.view.composer is None
+                        and self.view.export_dialog is None and self.view.search is None):
                     self.controller.refresh_queue_depths() if self.controller.pane == 1 else self.controller.refresh()
                 next_refresh = time.monotonic() + refresh
             height, width = window.getmaxyx()
@@ -476,7 +707,7 @@ def initialize_colors():
         palette += [(232 + i, (8 + 10 * i,) * 3) for i in range(24)]
         return min(palette, key=lambda item: sum((a - b) ** 2 for a, b in zip(rgb, item[1])))[0]
 
-    for bg in ("bg", "selected", "bar", "accent"):
+    for bg in ("bg", "selected", "bar", "accent", "green"):
         for fg in PALETTE:
             number = len(result) + 1
             if number >= curses.COLOR_PAIRS:
@@ -496,7 +727,7 @@ def draw_frame(window, frame, colors):
                 end += 1
             text = "".join(cell[0] for cell in row[x:end])
             attribute = colors.get((role, bg), curses.A_BOLD if role in ("accent", "green", "error") else curses.A_NORMAL)
-            if not colors and bg in ("selected", "accent"):
+            if not colors and bg in ("selected", "accent", "green"):
                 attribute |= curses.A_REVERSE
             try:
                 window.addstr(y, x, text, attribute)

@@ -32,6 +32,7 @@ class ConnectionState:
     queues: list[QueueInfo] = field(default_factory=list)
     messages: list[Message] = field(default_factory=list)
     messages_loaded: bool = False
+    marked_messages: set[str] = field(default_factory=set)
     queue_index: int = 0
     message_index: int = 0
     generation: int = 0
@@ -55,6 +56,10 @@ class ConnectionState:
     @property
     def selected_message(self):
         return self.messages[self.message_index] if 0 <= self.message_index < len(self.messages) else None
+
+    @property
+    def export_selection(self):
+        return [message for message in self.messages if message.selection_key in self.marked_messages]
 
     def clear_consumers(self):
         self.consumer_generation += 1
@@ -108,6 +113,7 @@ class Controller:
         state.depth_pending.clear()
         state.all_depths_pending = False
         state.queues, state.messages = [], []
+        state.marked_messages.clear()
         state.messages_loaded = False
         state.clear_consumers()
 
@@ -125,6 +131,7 @@ class Controller:
         state.clear_consumers()
         state.queue_index = index
         state.messages, state.message_index, state.messages_loaded = [], 0, False
+        state.marked_messages.clear()
         state.generation += 1
         state.busy = False
         self.detail_scroll = 0
@@ -156,6 +163,32 @@ class Controller:
     def select_message(self, index):
         self.current.message_index = max(0, min(index, len(self.current.messages) - 1))
         self.detail_scroll = 0
+
+    def export_messages(self, messages, path):
+        """Capture the queue and selected rows, then fetch/write off the UI thread."""
+        from .message_export import needs_full_message, write_export
+        state = self.current
+        if state.status != "connected" or not state.selected_queue:
+            raise ValueError("Connect to the queue before exporting messages.")
+        messages = tuple(messages)
+        if not messages:
+            raise ValueError("Select messages with Space before exporting.")
+        epoch, client = state.epoch, state.client
+        connection, queue_name = state.config.name, state.selected_queue.name
+
+        def run():
+            full = []
+            for message in messages:
+                if state.epoch != epoch or self.closed:
+                    raise ValueError("Connection changed before messages could be exported.")
+                if needs_full_message(message):
+                    message = Message.from_dict(client.request("full_message", queue=queue_name, message_id=message.message_id))
+                full.append(message)
+            if state.epoch != epoch or self.closed:
+                raise ValueError("Connection changed before messages could be exported.")
+            return write_export(path, connection, queue_name, full)
+
+        return state.executor.submit(run)
 
     def refresh(self):
         state = self.current
@@ -325,6 +358,7 @@ class Controller:
                     state.clear_consumers()
                     state.generation += 1
                     state.messages, state.message_index, state.busy = [], 0, False
+                    state.marked_messages.clear()
                     state.messages_loaded = False
                 self.notice = f"{state.config.name}: refreshed all {len(state.queues)} queue depths."
             elif operation in ("connect", "queues"):
@@ -342,6 +376,7 @@ class Controller:
                 if not state.selected_queue or state.selected_queue.name != previous:
                     state.clear_consumers()
                     state.messages, state.message_index, state.messages_loaded = [], 0, False
+                    state.marked_messages.clear()
                 state.generation += 1
                 if state.selected_queue and (requested or state.messages_loaded):
                     self.browse_queue(index)
@@ -351,6 +386,7 @@ class Controller:
             else:
                 previous = state.selected_message.message_id if state.selected_message else None
                 state.messages = [Message.from_dict(item) for item in value]
+                state.marked_messages.intersection_update(message.selection_key for message in state.messages)
                 state.messages_loaded = True
                 state.message_index = next((i for i, m in enumerate(state.messages) if m.message_id == previous), 0)
                 self.notice = f"{state.config.name}: loaded {len(state.messages)} messages; queue unchanged."

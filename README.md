@@ -146,8 +146,13 @@ requires `wl-clipboard` on Wayland or `xclip` / `xsel` on X11.
 | [ / ] | Scroll long detail lines horizontally; disable Body wrapping first |
 | w / s in inline Body | Toggle soft wrapping / syntax colors; expanded detail always keeps both on |
 | h | Cycle Headers / Properties / Body |
+| Ctrl+F, Enter | Search the complete selected message, including headers and properties |
+| F3 / Shift+F3 | Next / previous message search match, wrapping at the ends |
+| Space in Messages | Toggle the current message's export selection and advance one row |
+| Shift+Down / Shift+Up in Messages | Extend or shrink a range selection; Shift+mouse wheel works too |
+| e in Messages | Export marked messages to a JSON file |
 | /, Enter | Edit and apply a filter for the focused panel |
-| Escape | Return from full screen or clear focused filter |
+| Escape | Close search, return from full screen, clear focused filter, or clear marked messages |
 | r in queues | Refresh depths and consumer counts for all queues without reloading messages |
 | r in connections/messages | Refresh queues and messages |
 | c | Open consumer inspector for the selected queue, including empty queues |
@@ -158,6 +163,36 @@ requires `wl-clipboard` on Wayland or `xclip` / `xsel` on X11.
 | Inspector Tab / Shift+Tab | Focus list, Refresh consumers or X |
 | Inspector Escape / X | Return from details to list, then close; X closes immediately |
 | q / Ctrl+C | Quit, clear the curses screen and restore the terminal cursor |
+
+The bottom bar contains clickable buttons separated by vertical lines. Actions
+follow the focused panel or active dialog; Export appears only when messages
+are marked. Quit stays at the right edge. In a text-entry context, `q` remains
+text and the quit button shows `Ctrl+C` (`^C`). Buttons activate once per completed
+mouse click, using the same actions as their keyboard shortcuts.
+
+Press **Ctrl+F** while a message is selected, type a literal search term, then
+press **Enter**. Search is case-insensitive and covers Headers, Properties, and
+Body, including keys, off-screen rows, and text split across wrapped lines.
+**F3** and **Shift+F3** navigate matches, selecting the appropriate tab and
+scrolling the match into view. The current match and other matches have distinct
+highlights. **Escape** closes search before closing expanded detail. Search reads
+the complete message asynchronously when a body or metadata value is truncated;
+unavailable content produces an error instead of searching only the preview.
+Changing messages clears search; detail-tab clicks still only navigate.
+
+In the existing Messages list, **Space** toggles a `*` mark and moves down.
+**Shift+Down / Shift+Up** extend or shrink a range over the filtered list, keeping
+any earlier independent marks. The divider shows the total selected count,
+including marked messages hidden by a filter. **e** or the **Export** footer
+button opens a destination-file dialog. Enter a path and press Enter, or click
+Export JSON. One JSON file contains the selected messages' complete bodies,
+headers and properties with their JSON value types, plus the connection name,
+queue and export timestamp. Credentials are excluded. The default location is
+the ignored `exports/` directory; existing files are never overwritten.
+Truncated messages are re-read through the non-consuming worker before writing;
+a failed read writes no export. Export runs in the background and displays its
+result in the dialog. Marks survive refreshes for message IDs still present and
+are cleared when changing queues or disconnecting.
 
 The green dot follows a live provider connection. Each connection has an isolated
 worker process, so networking and Java calls do not block terminal navigation.

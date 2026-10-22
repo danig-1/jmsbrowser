@@ -54,6 +54,8 @@ class ViewOptions:
     copy_error: bool = False
     copy_until: float = 0
     copy_flash_until: float = 0
+    search: object = None
+    export_dialog: object = None
 
 
 class Frame:
@@ -177,7 +179,21 @@ def short_id(value, width):
     return clipped(value, width - tail) + value[-tail:]
 
 
-def draw_metadata(frame, entries, x, y, width, height, scroll=0, horizontal=0, empty="No properties."):
+def highlight_matches(frame, text, x, y, width, spans, offset=0):
+    """Recolor complete terminal cells without splitting wide/combining text."""
+    for start, end, active in spans:
+        start = max(start, offset)
+        if end <= start:
+            continue
+        left = wcswidth(text[offset:start])
+        right = min(width, wcswidth(text[offset:end]))
+        for column in range(left, right):
+            if 0 <= y < frame.height and 0 <= x + column < frame.width:
+                char, _, _ = frame.cells[y][x + column]
+                frame.cells[y][x + column] = char, "bg", "accent" if active else "green"
+
+
+def draw_metadata(frame, entries, x, y, width, height, scroll=0, horizontal=0, empty="No properties.", search=None, tab=None):
     key_width = min(max((wcswidth(safe_text(key)) for key, _ in entries), default=3), max(3, width // 3))
     key_width = max(3, key_width)
     value_x = x + key_width + 3
@@ -189,10 +205,23 @@ def draw_metadata(frame, entries, x, y, width, height, scroll=0, horizontal=0, e
     if not entries:
         frame.text(value_x, y + 2, empty, "muted", width=width - key_width - 3)
     for offset, (key, value) in enumerate(entries[start:start + rows]):
-        key = clipped(key, key_width)
-        frame.text(x + key_width - wcswidth(key), y + 2 + offset, key, "muted", width=key_width)
+        original_key = safe_text(key)
+        key_offset = 0
+        if search and search.current >= 0:
+            match = search.matches[search.current]
+            if match.tab == tab and match.line == start + offset and match.field == "key" and wcswidth(original_key[:match.end]) > key_width:
+                key_offset = match.start
+        key = clipped(original_key[key_offset:], key_width)
+        key_x = x + key_width - wcswidth(key)
+        frame.text(key_x, y + 2 + offset, key, "muted", width=key_width)
         frame.text(x + key_width + 1, y + 2 + offset, "│", "border")
-        frame.text(value_x, y + 2 + offset, safe_text(value)[horizontal:], width=width - key_width - 3)
+        value = safe_text(value)
+        frame.text(value_x, y + 2 + offset, value[horizontal:], width=width - key_width - 3)
+        if search:
+            highlight_matches(frame, original_key, key_x, y + 2 + offset, wcswidth(key),
+                              search.spans(tab, start + offset, "key"), key_offset)
+            highlight_matches(frame, value, value_x, y + 2 + offset, width - key_width - 3,
+                              search.spans(tab, start + offset, "value"), horizontal)
     return start, rows
 
 
@@ -229,14 +258,17 @@ def draw_detail(frame, state, controller, view, x, y, width, height):
         tab_x += len(label) + 3
     frame.text(x + 1, y + 2, f"MessageId: {message.message_id}", "muted", width=width - 2)
     identity = detail_identity(controller)
+    search = view.search if view.search and view.search.owner == identity[:-1] else None
     now = time.monotonic()
+    if search:
+        frame.text(x + 1, y + 1, search.status(), "error" if search.error else "accent", width=width - 2)
     if view.copy_identity == identity and now < view.copy_until:
         frame.text(x + 1, y + 1, view.copy_feedback, "error" if view.copy_error else "accent", width=width - 2)
     if controller.detail_tab in (1, 2):
         lines = message.metadata(controller.detail_tab)
         start, rows = draw_metadata(frame, lines, x + 1, y + 4, width - 2, height - 5,
                                     controller.detail_scroll, view.horizontal_scroll,
-                                    "No headers." if controller.detail_tab == 1 else "No properties.")
+                                    "No headers." if controller.detail_tab == 1 else "No properties.", search, controller.detail_tab)
         unit = "rows"
         data_x, data_y, data_width = x + 1, y + 6, width - 2
     else:
@@ -282,6 +314,10 @@ def draw_detail(frame, state, controller, view, x, y, width, height):
                         cell_x, cell_y = x + 7 + column, y + 4 + row
                         char, _, bg = frame.cells[cell_y][cell_x]
                         frame.cells[cell_y][cell_x] = char, role, bg
+            if search:
+                spans = [(a - line.offset, b - line.offset, active)
+                         for a, b, active in search.spans(0, line.number - 1, "body")]
+                highlight_matches(frame, line.text, x + 7, y + 4 + row, width - 8, spans, offset)
         unit = "rows" if wrap else "lines"
         data_x, data_y, data_width = x + 7, y + 4, width - 8
     for row in range(len(lines[start:start + rows])):
@@ -485,7 +521,11 @@ def render(controller, width, height, view=None):
             bg = "selected" if selected and focused else "bar" if selected else "bg"
             role = "accent" if selected and focused else "muted" if selected else "text"
             frame.row(mx, y, available, "", selected, focused=focused)
-            if selected and focused:
+            marked = message.selection_key in state.marked_messages
+            if marked:
+                role = "accent" if selected and focused else "green"
+                frame.text(mx - 1, y, "*", role, bg)
+            elif selected and focused:
                 frame.text(mx - 1, y, ">", "accent")
             x = mx
             values = (short_id(message.message_id, column_widths[0]), format_message_datetime(message.headers.get("JMSTimestamp")),
@@ -495,7 +535,8 @@ def render(controller, width, height, view=None):
                 x += column_width + 2
             frame.row_hits[("messages", y)] = index
         frame.line(mx, divider, available)
-        frame.text(mx + 1, divider, f" {min(start + 1, len(indices))}-{min(start + rows, len(indices))} / {len(indices)} ", "muted")
+        selection = f" · {len(state.export_selection)} selected" if state.export_selection else ""
+        frame.text(mx + 1, divider, f" {min(start + 1, len(indices))}-{min(start + rows, len(indices))} / {len(indices)}{selection} ", "muted")
         if state.messages and not indices:
             frame.text(mx + 1, detail_y + 1, "No messages match the filter. Escape clears it.", "muted", width=available - 2)
         else:
@@ -504,19 +545,14 @@ def render(controller, width, height, view=None):
         for index, divider_x in enumerate((left, right_x - 1)):
             frame.dividers.append((index, divider_x - 1, panel_y, 3, panel_h))
             frame.text(divider_x, panel_y + panel_h // 2, "↔", "accent", "selected" if view.drag_divider == index else "bar")
-    frame.fill(0, height - 1, width, bg="bar")
-    if view.prompt is not None:
-        footer = f"Filter: {view.prompt}_   Enter apply · Escape cancel"
-    elif view.consumer_inspector:
-        footer = "c refresh consumers  ↑↓ select/scroll  Enter details  Tab controls  Esc back  q quit"
-    elif view.fullscreen:
-        footer = "Tab/Shift+Tab/click tabs  ↑↓/PgUp/PgDn scroll  n compose  c consumers  r refresh  Esc back  q quit"
-    else:
-        footer = "↑↓ select  Enter connect/browse/detail  n compose  c consumers  r refresh  h tabs  / filter  q quit"
-    frame.text(1, height - 1, footer, "accent", "bar", width - 2)
     if view.consumer_inspector:
         draw_consumer_inspector(frame, controller, view)
     if view.composer is not None:
         from .composer_screen import draw_composer
         draw_composer(frame, view.composer)
+    if view.export_dialog is not None:
+        from .message_export import draw_export
+        draw_export(frame, view.export_dialog)
+    from .footer import draw_footer
+    draw_footer(frame, controller, view)
     return frame

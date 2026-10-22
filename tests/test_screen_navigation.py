@@ -685,7 +685,14 @@ def test_queue_buttons_removed_and_keyboard_hints_retained(controller, fullscree
     text = "\n".join(frame.plain_lines())
     assert "[ Refresh ]" not in text and "[ Consumers ]" not in text
     footer = frame.plain_lines()[-1]
-    assert "c consumers" in footer and "r refresh" in footer
+    assert "^F find" in footer
+    if fullscreen:
+        assert "c consumers" not in footer and "r refresh" not in footer
+    else:
+        assert "r refresh" in footer
+        controller.pane = 1
+        footer = render(controller, 160, 46).plain_lines()[-1]
+        assert "c consumers" in footer and "r refresh" in footer
 
 
 def test_consumer_c_refreshes_and_r_has_no_action(controller, consumer_app):

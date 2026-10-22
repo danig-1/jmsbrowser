@@ -25,6 +25,7 @@ class BodyRow:
     continuation: bool
     text: str
     spans: tuple = ()  # (start character, end character, palette role)
+    offset: int = 0  # character offset in the unwrapped source line
 
 
 @dataclass(frozen=True)
@@ -124,5 +125,5 @@ def body_layout(body, message_type, truncated, width, wrap):
                 a, b, role = spans[index]
                 colors.append((max(a, start) - start, min(b, end) - start, role))
                 index += 1
-            rows.append(BodyRow(number, start > 0, line[start:end], tuple(colors)))
+            rows.append(BodyRow(number, start > 0, line[start:end], tuple(colors), start))
     return BodyLayout(kind, tuple(rows), len(lines))

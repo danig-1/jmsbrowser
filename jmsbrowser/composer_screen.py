@@ -166,12 +166,6 @@ def draw_composer(frame, composer):
     if composer.stage in ("preview", "sending", "sent", "error") and not notice:
         notice = f"Review lines {composer.preview_scroll + 1}-{min(len(lines), composer.preview_scroll + rows)} / {len(lines)}"
     frame.text(left, y + height - 2, composer.error or notice, "error" if composer.error else "muted", width=inner)
-    footer = ("Tab/Shift+Tab/click fields  F2 preview  F3 load body  F4 save draft  F5 load draft  F6 property  Esc cancel"
-              if composer.stage == "edit" else "↑↓/PgUp/PgDn review  Tab/click controls  Enter activate  Esc back")
-    if composer.stage == "sending":
-        footer = "Sending one message… wait for the result. No automatic retries."
-    frame.fill(0, frame.height - 1, frame.width, bg="bar")
-    frame.text(1, frame.height - 1, footer, "accent", "bar", frame.width - 2)
     if composer.prompt is not None:
         labels = {"load_body": "Load body file · UTF-8", "load_draft": "Load message draft", "save_draft": "Save message draft · JSON"}
         py, ph = max(y + 2, y + height // 2 - 3), 7
@@ -183,5 +177,3 @@ def draw_composer(frame, composer):
         frame.text(left + 1, py + 1, "Path (Ctrl+U clears)", "muted", width=inner - 2)
         editor(frame, composer, "path", composer.prompt, left + 1, py + 2, inner - 2)
         frame.text(left + 1, py + 4, composer.error or "Enter applies · Escape returns", "error" if composer.error else "muted", width=inner - 2)
-        frame.fill(0, frame.height - 1, frame.width, bg="bar")
-        frame.text(1, frame.height - 1, "Enter apply path  Ctrl+U clear  Esc return", "accent", "bar", frame.width - 2)
