@@ -227,7 +227,11 @@ class ArtemisAdapter(JMSAdapter):
         if parsed.scheme not in ("http", "https") or parsed.username or parsed.password:
             raise ValueError("management_url must be an HTTP(S) URL without credentials.")
         credentials = f"{cfg.management_username or cfg.username}:{cfg.get_password(management=True)}"
-        headers = {"Content-Type": "application/json", "Authorization": "Basic " + base64.b64encode(credentials.encode()).decode()}
+        headers = {
+            "Content-Type": "application/json",
+            "Authorization": "Basic " + base64.b64encode(credentials.encode()).decode(),
+            "Origin": f"{parsed.scheme}://{parsed.netloc}"
+        }
         request = urllib.request.Request(cfg.management_url.rstrip("/"), json.dumps(payload).encode(), headers, method="POST")
         options = {"timeout": cfg.timeout_seconds}
         if parsed.scheme == "https":
