@@ -1,4 +1,5 @@
 import queue
+import subprocess
 from types import SimpleNamespace
 import threading
 import time
@@ -40,12 +41,47 @@ def test_worker_deadline_kills_unresponsive_process():
     client = WorkerClient.__new__(WorkerClient)
     client.config = SimpleNamespace(timeout_seconds=0.02, name="Unreachable")
     client.closed, client.lock, client.responses = False, threading.Lock(), queue.Queue()
+    client._close_lock = threading.Lock()
     client.process = Process()
     started = time.monotonic()
     with pytest.raises(BrokerError, match="timed out"):
         client.request("queues")
     assert client.process.killed and client.closed
     assert time.monotonic() - started < 1
+
+
+def test_worker_eof_unblocks_pending_send_with_unknown_delivery(monkeypatch):
+    popen = subprocess.Popen
+    def exit_after_request(command, **options):
+        return popen([command[0], "-c", "import sys; sys.stdin.readline()"], **options)
+
+    monkeypatch.setattr("jmsbrowser.client.subprocess.Popen", exit_after_request)
+    with WorkerClient(ConnectionConfig("Test", "artemis")) as client:
+        with pytest.raises(BrokerError, match="worker stopped") as error:
+            client.request("send", queue="Q", message={})
+        assert error.value.outcome == "unknown"
+        assert client.events.get(timeout=3)["event"] == "connection_error"
+        assert client.closed
+
+        with pytest.raises(BrokerError, match="Connection is closed") as later:
+            client.request("send", queue="Q", message={})
+        assert later.value.outcome == "not_sent"
+
+
+def test_intentional_worker_close_does_not_publish_failure(monkeypatch, sample_worker):
+    done = threading.Event()
+    read = WorkerClient._read
+
+    def read_until_closed(client):
+        try:
+            read(client)
+        finally:
+            done.set()
+
+    monkeypatch.setattr(WorkerClient, "_read", read_until_closed)
+    with WorkerClient(ConnectionConfig("Test", "artemis")) as client:
+        client.request("connect")
+    assert done.wait(3) and client.closed and client.events.empty()
 
 
 def test_source_worker_browses_when_parent_runs_outside_checkout(tmp_path, monkeypatch, sample_worker):

@@ -214,6 +214,27 @@ def test_provider_connection_loss_clears_connected_dot(monkeypatch):
         controller.close()
 
 
+def test_idle_worker_exit_clears_connected_state_and_can_reconnect(sample_worker):
+    controller = Controller(Config((ConnectionConfig("Test", "artemis"),)))
+    try:
+        controller.connect()
+        wait_until(controller, lambda: controller.current.status == "connected")
+        state = controller.current
+        client = state.client
+        assert not state.busy
+
+        client.process.kill()
+        wait_until(controller, lambda: state.status == "error")
+        assert state.client is None and not state.queues
+        assert "Broker worker stopped" in state.error
+
+        controller.connect()
+        wait_until(controller, lambda: state.status == "connected")
+        assert state.client is not client and state.queues
+    finally:
+        controller.close()
+
+
 def test_all_depth_refresh_preserves_messages_without_rebrowsing(monkeypatch):
     monkeypatch.setattr("jmsbrowser.state.WorkerClient", FakeClient)
     FakeClient.release.set()

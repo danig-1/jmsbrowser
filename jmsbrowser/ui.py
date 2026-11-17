@@ -376,13 +376,14 @@ class TerminalApp:
             self.controller.refresh_consumers()
             view.consumer_scroll = 0
         elif key == "ENTER":
-            if view.consumer_focus == 1:
+            action = view.consumer_enter_action(state)
+            if action == "refresh":
                 self.controller.refresh_consumers()
-            elif view.consumer_focus == 2:
+            elif action == "close":
                 view.consumer_inspector = False
                 view.consumer_detail = False
-            elif state.consumer_status == "ready" and state.consumer_snapshot and state.consumer_snapshot.consumers:
-                view.consumer_detail = not view.consumer_detail
+            elif action in ("details", "list"):
+                view.consumer_detail = action == "details"
                 view.consumer_scroll = view.consumer_horizontal = 0
         elif key in ("UP", "DOWN", "PGUP", "PGDOWN"):
             step = -1 if key in ("UP", "PGUP") else 1
@@ -440,9 +441,7 @@ class TerminalApp:
             if key == "q" and (view.export_dialog.result or view.export_dialog.working):
                 self.running = False
                 return
-            if key == "EXPORT":
-                view.export_dialog.start(c)
-            elif view.export_dialog.key(key, c):
+            if view.export_dialog.key(key, c):
                 view.export_dialog = None
             return
         if view.prompt is not None:

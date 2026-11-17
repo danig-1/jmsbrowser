@@ -48,6 +48,14 @@ class MessageExport:
     def working(self):
         return self.future is not None and not self.future.done()
 
+    @property
+    def enter_action(self):
+        if self.working:
+            return None
+        if self.result:
+            return "close"
+        return "cancel" if self.focus == 2 else "export"
+
     def sync(self):
         if self.future is not None and self.future.done():
             try:
@@ -80,14 +88,15 @@ class MessageExport:
             return False
         if key in ("ESC", "QUIT"):
             return True
+        if key == "ENTER":
+            if self.enter_action == "export":
+                self.start(controller)
+                return False
+            return True
         if self.result:
-            return key == "ENTER"
+            return False
         if key in ("TAB", "BACKTAB"):
             self.focus = (self.focus + (1 if key == "TAB" else -1)) % 3
-        elif key == "ENTER":
-            if self.focus == 2:
-                return True
-            self.start(controller)
         elif self.focus == 0:
             self.path.edit(key)
         return False

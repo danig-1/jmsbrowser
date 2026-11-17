@@ -1,13 +1,16 @@
 from __future__ import annotations
 
+from contextlib import suppress
 import json
-import os
 from pathlib import Path
 import queue
 import subprocess
 import sys
 import tempfile
 import threading
+
+
+WORKER_STOPPED = "Broker worker stopped. Reconnect to try again."
 
 
 class BrokerError(RuntimeError):
@@ -21,6 +24,7 @@ class WorkerClient:
         self.config = config
         self.responses, self.events = queue.Queue(), queue.Queue()
         self.lock = threading.Lock()
+        self._close_lock = threading.Lock()
         self.closed = False
         self.log = tempfile.TemporaryFile(mode="w+b")
         flags = subprocess.CREATE_NO_WINDOW if sys.platform == "win32" else 0
@@ -36,11 +40,24 @@ class WorkerClient:
                     value = json.loads(line)
                 except ValueError:
                     continue
-                (self.events if "event" in value else self.responses).put(value)
+                if isinstance(value, dict):
+                    (self.events if "event" in value else self.responses).put(value)
         except (OSError, ValueError):
             pass
         finally:
-            self.responses.put({"ok": False, "error": "Broker worker stopped. Reconnect to try again."})
+            self._mark_closed(WORKER_STOPPED)
+
+    def _mark_closed(self, error=None):
+        # This lock must be separate from the request lock: a request may be
+        # waiting for the reader to report EOF while holding that lock.
+        with self._close_lock:
+            if self.closed:
+                return False
+            self.closed = True
+            if error is not None:
+                self.responses.put({"ok": False, "error": error})
+                self.events.put({"event": "connection_error", "error": error})
+            return True
 
     def request(self, operation, **kwargs):
         with self.lock:
@@ -57,19 +74,20 @@ class WorkerClient:
                 self.abort()
                 raise BrokerError(f"{self.config.name}: {operation} timed out after {self.config.timeout_seconds}s. Reconnect to retry.", "unknown" if operation == "send" else None) from None
             except (BrokenPipeError, OSError, ValueError) as error:
-                raise BrokerError("Broker worker stopped. Reconnect to try again.", "unknown" if operation == "send" else None) from error
+                raise BrokerError(WORKER_STOPPED, "unknown" if operation == "send" else None) from error
             if not response.get("ok"):
                 raise BrokerError(response.get("error", "Broker operation failed."), response.get("outcome") or ("unknown" if operation == "send" else None))
             return response.get("result")
 
     def abort(self):
-        self.closed = True
-        if self.process.poll() is None:
-            self.process.kill()
+        self._mark_closed()
+        with suppress(ProcessLookupError):
+            if self.process.poll() is None:
+                self.process.kill()
         self.responses.put({"ok": False, "error": "Connection closed."})
 
     def close(self):
-        if not self.closed and self.lock.acquire(blocking=False):
+        if self._mark_closed() and self.lock.acquire(blocking=False):
             try:
                 self.process.stdin.write('{"op":"close"}\n')
                 self.process.stdin.flush()
@@ -80,7 +98,6 @@ class WorkerClient:
                 self.lock.release()
         else:
             self.abort()
-        self.closed = True
         try:
             self.process.wait(timeout=1)
         except subprocess.TimeoutExpired:

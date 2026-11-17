@@ -57,6 +57,15 @@ class ViewOptions:
     search: object = None
     export_dialog: object = None
 
+    def consumer_enter_action(self, state):
+        if self.consumer_focus == 1:
+            return "refresh"
+        if self.consumer_focus == 2:
+            return "close"
+        if state.consumer_status == "ready" and state.consumer_snapshot and state.consumer_snapshot.consumers:
+            return "list" if self.consumer_detail else "details"
+        return None
+
 
 class Frame:
     def __init__(self, width, height, ascii=False):

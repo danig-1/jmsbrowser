@@ -392,6 +392,7 @@ def test_worker_send_timeout_is_unknown_and_is_not_retried():
     client = WorkerClient.__new__(WorkerClient)
     client.config = SimpleNamespace(timeout_seconds=0.01, name="Slow broker")
     client.closed, client.lock, client.responses = False, threading.Lock(), queue.Queue()
+    client._close_lock = threading.Lock()
     client.process = SimpleNamespace(stdin=SimpleNamespace(write=writes.append, flush=lambda: None), poll=lambda: None, kill=lambda: None)
     with pytest.raises(BrokerError) as error:
         client.request("send", queue="Q", message=OutgoingMessage("payload").to_dict())

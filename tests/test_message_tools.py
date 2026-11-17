@@ -334,8 +334,8 @@ def test_export_dialog_uses_snapshot_handles_errors_and_quietly_ignores_duplicat
         future.set_running_or_notify_cancel()
         return future
     monkeypatch.setattr(app.controller, "export_messages", export)
-    click_footer(app, "EXPORT")
-    app.handle_key("EXPORT")
+    click_footer(app, "ENTER")
+    app.handle_key("ENTER")
     app.handle_key("ESC")
     assert len(calls) == 1 and dialog.working and app.view.export_dialog is dialog
     future.set_exception(ValueError("Message disappeared"))
@@ -353,8 +353,25 @@ def test_export_dialog_rejects_a_changed_queue_before_starting(app, monkeypatch)
     app.controller.select_queue(0)
     calls = []
     monkeypatch.setattr(app.controller, "export_messages", lambda *args: calls.append(args))
-    app.handle_key("EXPORT")
+    app.handle_key("ENTER")
     assert not calls and "queue or connection changed" in dialog.error
+
+
+@pytest.mark.parametrize("by_mouse", [False, True])
+def test_export_footer_follows_cancel_focus(app, monkeypatch, by_mouse):
+    app.handle_key(" ")
+    app.handle_key("e")
+    calls = []
+    monkeypatch.setattr(app.controller, "export_messages", lambda *args: calls.append(args))
+    assert "Enter export" in frame(app).plain_lines()[-1]
+    app.handle_key("BACKTAB")
+    footer = frame(app).plain_lines()[-1]
+    assert "Enter cancel" in footer and "Enter export" not in footer
+    if by_mouse:
+        click_footer(app, "ENTER")
+    else:
+        app.handle_key("ENTER")
+    assert app.view.export_dialog is None and not calls
 
 
 def test_modal_footer_actions_use_the_active_screen_and_never_send_before_review(app, monkeypatch):
@@ -380,6 +397,29 @@ def test_modal_footer_actions_use_the_active_screen_and_never_send_before_review
     assert calls == ["consumers"]
     assert "Space mark" not in frame(app).plain_lines()[-1]
     click_footer(app, "ESC")
+    assert not app.view.consumer_inspector
+
+
+def test_consumer_footer_enter_follows_inspector_focus(app, monkeypatch):
+    state = app.controller.current
+    state.consumer_snapshot = SampleAdapter(state.config).consumers(state.selected_queue.name)
+    state.consumer_status = "ready"
+    app.view.consumer_inspector = True
+    calls = []
+    monkeypatch.setattr(app.controller, "refresh_consumers", lambda: calls.append("refresh"))
+
+    assert "Enter details" in frame(app).plain_lines()[-1]
+    click_footer(app, "ENTER")
+    assert app.view.consumer_detail and "Enter list" in frame(app).plain_lines()[-1]
+    app.handle_key("ENTER")
+    assert not app.view.consumer_detail
+    app.handle_key("TAB")
+    assert "Enter refresh" in frame(app).plain_lines()[-1]
+    click_footer(app, "ENTER")
+    assert calls == ["refresh"] and app.view.consumer_inspector
+    app.handle_key("TAB")
+    assert "Enter close" in frame(app).plain_lines()[-1]
+    click_footer(app, "ENTER")
     assert not app.view.consumer_inspector
 
 

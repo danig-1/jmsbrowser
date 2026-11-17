@@ -221,7 +221,7 @@ class JMSAdapter:
 
 
 class ArtemisAdapter(JMSAdapter):
-    def jolokia(self, payload):
+    def jolokia(self, payload, *, allow_missing_mbeans=False):
         cfg = self.config
         parsed = urlsplit(cfg.management_url)
         if parsed.scheme not in ("http", "https") or parsed.username or parsed.password:
@@ -240,9 +240,23 @@ class ArtemisAdapter(JMSAdapter):
             options["context"] = self.management_ssl_context
         with urllib.request.urlopen(request, **options) as response:
             data = json.load(response)
-        for item in data if isinstance(data, list) else [data]:
-            if item.get("status") != 200:
-                raise RuntimeError(f"Artemis management request failed: {item.get('error', item.get('status'))}")
+        bulk = isinstance(payload, list)
+        if bulk and (not isinstance(data, list) or len(data) != len(payload)):
+            raise RuntimeError("Artemis management returned an invalid bulk response.")
+        items = data if bulk else [data]
+        for index, item in enumerate(items):
+            if not isinstance(item, dict) or "status" not in item:
+                raise RuntimeError("Artemis management returned an invalid response item.")
+            status = item["status"]
+            if status == 200:
+                continue
+            missing = "javax.management.InstanceNotFoundException"
+            if (bulk and allow_missing_mbeans and status in (400, 404)
+                    and missing in (item.get("error_type"), item.get("error_type_jmx"))):
+                # Keep the response aligned with the original batch request.
+                items[index] = None
+                continue
+            raise RuntimeError(f"Artemis management request failed: {item.get('error', status)}")
         return data
 
     def list_queues(self):
@@ -261,18 +275,21 @@ class ArtemisAdapter(JMSAdapter):
                 if routing.startswith('"'):
                     routing = str(ObjectName.unquote(routing))
                 queues.append((name, mbean, routing.upper()))
-        self.queue_mbeans = {}
         if not queues:
+            self.queue_mbeans = {}
             return []
         metadata = self.jolokia([{"type": "read", "mbean": mbean, "attribute": ["MessageCount", "Temporary", "ConsumerCount"]}
-                                 for _, mbean, _ in queues])
-        visible = []
+                                 for _, mbean, _ in queues], allow_missing_mbeans=True)
+        visible, queue_mbeans = [], {}
         for (name, mbean, routing), response in zip(queues, metadata):
+            if response is None:
+                continue
             attributes = response["value"]
             if attributes["Temporary"]:
                 continue
-            self.queue_mbeans[name] = mbean
+            queue_mbeans[name] = mbean
             visible.append(QueueInfo(name, int(attributes["MessageCount"]), routing, int(attributes["ConsumerCount"])))
+        self.queue_mbeans = queue_mbeans
         return sorted(visible, key=lambda q: q.name)
 
     def queue_depth(self, queue_name):

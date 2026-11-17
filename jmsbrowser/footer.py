@@ -10,11 +10,12 @@ def footer_options(controller, view):
     arrows = [("↑", "UP"), ("↓", "DOWN")]
     if view.export_dialog is not None:
         dialog = view.export_dialog
-        if dialog.working:
+        action = dialog.enter_action
+        if action is None:
             return [], [quit_button], "Exporting messages…"
-        if dialog.result:
-            return [("Enter close", "ESC")], [quit_button], ""
-        buttons = [("Enter export", "EXPORT")]
+        buttons = [(f"Enter {action}", "ENTER")]
+        if action == "close":
+            return buttons, [quit_button], ""
         if dialog.focus == 0:
             buttons += [("^U clear", "\x15")]
         return buttons, [("Esc cancel", "ESC"), ("^C quit", "QUIT")], ""
@@ -38,8 +39,9 @@ def footer_options(controller, view):
     if view.consumer_inspector:
         available = state.consumer_status == "ready" and state.consumer_snapshot and state.consumer_snapshot.consumers
         buttons = arrows if available else []
-        if available:
-            buttons += [("Enter list" if view.consumer_detail else "Enter details", "ENTER")]
+        action = view.consumer_enter_action(state)
+        if action:
+            buttons += [(f"Enter {action}", "ENTER")]
         buttons += [("c refresh consumers", "c")]
         return buttons, [("Esc back", "ESC"), quit_button], ""
     search = view.search
